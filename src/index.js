@@ -1,0 +1,16 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.version = exports.ValidationError = exports.NetworkError = exports.RateLimitError = exports.AuthenticationError = exports.InvalidResponseError = exports.HandelsregisterError = exports.Company = exports.Handelsregister = void 0;
+var client_1 = require("./client");
+Object.defineProperty(exports, "Handelsregister", { enumerable: true, get: function () { return client_1.Handelsregister; } });
+var company_1 = require("./company");
+Object.defineProperty(exports, "Company", { enumerable: true, get: function () { return company_1.Company; } });
+var errors_1 = require("./errors");
+Object.defineProperty(exports, "HandelsregisterError", { enumerable: true, get: function () { return errors_1.HandelsregisterError; } });
+Object.defineProperty(exports, "InvalidResponseError", { enumerable: true, get: function () { return errors_1.InvalidResponseError; } });
+Object.defineProperty(exports, "AuthenticationError", { enumerable: true, get: function () { return errors_1.AuthenticationError; } });
+Object.defineProperty(exports, "RateLimitError", { enumerable: true, get: function () { return errors_1.RateLimitError; } });
+Object.defineProperty(exports, "NetworkError", { enumerable: true, get: function () { return errors_1.NetworkError; } });
+Object.defineProperty(exports, "ValidationError", { enumerable: true, get: function () { return errors_1.ValidationError; } });
+var version_1 = require("./version");
+Object.defineProperty(exports, "version", { enumerable: true, get: function () { return version_1.version; } });
