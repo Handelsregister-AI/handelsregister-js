@@ -18,7 +18,7 @@ const program = new Command();
 program
   .name('handelsregister')
   .description('CLI for accessing German company registry (Handelsregister) data')
-  .version('1.0.0')
+  .version('0.1.0')
   .option('-k, --api-key <key>', 'API key (defaults to HANDELSREGISTER_API_KEY env var)')
   .option('--no-color', 'Disable colored output');
 

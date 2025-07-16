@@ -1,5 +1,10 @@
 # Handelsregister Node.js SDK
 
+[![npm version](https://img.shields.io/npm/v/handelsregister.svg)](https://www.npmjs.com/package/handelsregister)
+[![npm downloads](https://img.shields.io/npm/dm/handelsregister.svg)](https://www.npmjs.com/package/handelsregister)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
+
 Official Node.js SDK for accessing German company registry (Handelsregister) data via the handelsregister.ai API.
 
 ## Installation

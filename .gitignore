@@ -37,6 +37,10 @@ yarn-error.log*
 # TypeScript cache
 *.tsbuildinfo
 
+# Compiled JS files in src (build artifacts)
+src/**/*.js
+src/**/*.js.map
+
 # Temporary files
 tmp/
 temp/

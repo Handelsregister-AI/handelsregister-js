@@ -1,6 +1,6 @@
 {
   "name": "handelsregister",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Node.js SDK for accessing German company registry (Handelsregister) data via handelsregister.ai API",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",
@@ -70,10 +70,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/handelsregister/handelsregister-js.git"
+    "url": "https://github.com/Handelsregister-AI/handelsregister-js.git"
   },
   "bugs": {
-    "url": "https://github.com/handelsregister/handelsregister-js/issues"
+    "url": "https://github.com/Handelsregister-AI/handelsregister-js/issues"
   },
   "homepage": "https://handelsregister.ai"
 }
