@@ -106,11 +106,11 @@ export class Company {
 
   async getRegisterNumber(): Promise<string | undefined> {
     const data = await this.ensureData();
-    return data.registration?.register_number;
+    return data.registration?.register_number || data.register_number;
   }
 
   get registerNumber(): string | undefined {
-    return this.data?.registration?.register_number;
+    return this.data?.registration?.register_number || this.data?.register_number;
   }
 
   get registrationNumber(): string | undefined {
@@ -119,11 +119,11 @@ export class Company {
 
   async getRegisterDate(): Promise<string | undefined> {
     const data = await this.ensureData();
-    return data.register_date;
+    return data.register_date || data.registration?.register_date;
   }
 
   get registerDate(): string | undefined {
-    return this.data?.register_date;
+    return this.data?.register_date || this.data?.registration?.register_date;
   }
 
   async getLegalForm(): Promise<string | undefined> {

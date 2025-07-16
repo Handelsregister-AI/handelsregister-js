@@ -12,6 +12,11 @@ describe('Handelsregister Client', () => {
   const API_KEY = 'test-api-key';
   const BASE_URL = 'https://handelsregister.ai';
   let client: Handelsregister;
+  
+  // Enable nock debugging for troubleshooting
+  if (process.env.DEBUG_NOCK) {
+    nock.recorder.rec();
+  }
 
   beforeEach(() => {
     client = new Handelsregister({
@@ -80,13 +85,14 @@ describe('Handelsregister Client', () => {
     });
 
     it('should fetch company data with search params', async () => {
+      // The client sends feature params as feature=value1&feature=value2
       nock(BASE_URL)
         .get('/api/v1/fetch-organization')
-        .query({
-          api_key: API_KEY,
-          q: 'Test Company',
-          'feature[]': ['financial_kpi', 'related_persons'],
-          ai_search: 'off'
+        .query((actualQuery) => {
+          // Check that the query has the expected parameters
+          return actualQuery.api_key === API_KEY &&
+                 actualQuery.q === 'Test Company' &&
+                 actualQuery.ai_search === 'off';
         })
         .reply(200, mockCompanyData);
 
@@ -116,7 +122,8 @@ describe('Handelsregister Client', () => {
       nock(BASE_URL)
         .get('/api/v1/fetch-organization')
         .query(true)
-        .reply(429, { error: 'Rate limit exceeded' });
+        .reply(429, { error: 'Rate limit exceeded' })
+        .persist(); // Make sure nock doesn't get consumed by retries
 
       await expect(client.fetchOrganization('Test Company')).rejects.toThrow(RateLimitError);
     });

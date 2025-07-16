@@ -292,12 +292,18 @@ describe('Company Class', () => {
     let company: Company;
 
     beforeEach(async () => {
-      company = new Company('Test Company', API_KEY);
+      // Create a client with caching disabled
+      const client = new Handelsregister({
+        apiKey: API_KEY,
+        cacheEnabled: false
+      });
+      company = new Company('Test Company', client);
       
       nock(BASE_URL)
         .get('/api/v1/fetch-organization')
         .query(true)
-        .reply(200, mockCompanyData);
+        .reply(200, mockCompanyData)
+        .persist();
       
       await company.getName();
     });
@@ -319,14 +325,28 @@ describe('Company Class', () => {
     });
 
     it('should refresh data', async () => {
+      // First verify the initial state
+      expect(company.name).toBe('Test Company GmbH');
+      
       const updatedData = { ...mockCompanyData, name: 'Updated Company GmbH' };
       
+      // Clean up the persistent nock from beforeEach
+      nock.cleanAll();
+      
+      // Set up a new nock for the refresh call - use .persist() to ensure it's available
       nock(BASE_URL)
         .get('/api/v1/fetch-organization')
-        .query(true)
+        .query(true)  // Accept any query params
         .reply(200, updatedData);
 
       await company.refresh();
+      
+      // Check if nock was called
+      if (!nock.isDone()) {
+        console.log('Pending nock interceptors:', nock.pendingMocks());
+      }
+      
+      // The refresh should have fetched the updated data
       expect(company.name).toBe('Updated Company GmbH');
     });
   });
