@@ -1,6 +1,6 @@
 {
   "name": "handelsregister",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Node.js SDK for accessing German company registry (Handelsregister) data via handelsregister.ai API",
   "main": "dist/index.js",
   "module": "dist/index.esm.js",

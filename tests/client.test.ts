@@ -1,27 +1,22 @@
 import nock from 'nock';
 import { Handelsregister } from '../src/client';
-import { 
-  AuthenticationError, 
-  ValidationError, 
+import {
+  AuthenticationError,
+  ValidationError,
   RateLimitError,
-  HandelsregisterError 
+  HandelsregisterError,
 } from '../src/errors';
-import { CompanyData } from '../src/types';
+import { CompanyData, PersonData, SearchOrganizationsResponse } from '../src/types';
 
 describe('Handelsregister Client', () => {
   const API_KEY = 'test-api-key';
   const BASE_URL = 'https://handelsregister.ai';
   let client: Handelsregister;
-  
-  // Enable nock debugging for troubleshooting
-  if (process.env.DEBUG_NOCK) {
-    nock.recorder.rec();
-  }
 
   beforeEach(() => {
     client = new Handelsregister({
       apiKey: API_KEY,
-      cacheEnabled: false // Disable cache for tests
+      cacheEnabled: false, // Disable cache for tests
     });
     nock.cleanAll();
   });
@@ -32,36 +27,103 @@ describe('Handelsregister Client', () => {
 
   describe('constructor', () => {
     it('should create client with API key string', () => {
-      const client = new Handelsregister('test-key');
-      expect(client).toBeInstanceOf(Handelsregister);
+      const c = new Handelsregister('test-key');
+      expect(c).toBeInstanceOf(Handelsregister);
     });
 
     it('should create client with config object', () => {
-      const client = new Handelsregister({
+      const c = new Handelsregister({
         apiKey: 'test-key',
         timeout: 30000,
-        cacheEnabled: true
+        cacheEnabled: true,
       });
-      expect(client).toBeInstanceOf(Handelsregister);
+      expect(c).toBeInstanceOf(Handelsregister);
+    });
+
+    it('should create client with bearer token', () => {
+      const c = new Handelsregister({ bearerToken: 'token-abc' });
+      expect(c).toBeInstanceOf(Handelsregister);
     });
 
     it('should use environment variable if no API key provided', () => {
       const originalEnv = process.env.HANDELSREGISTER_API_KEY;
       process.env.HANDELSREGISTER_API_KEY = 'env-api-key';
-      
-      const client = new Handelsregister({ apiKey: '' });
-      expect(client).toBeInstanceOf(Handelsregister);
-      
-      process.env.HANDELSREGISTER_API_KEY = originalEnv;
+
+      try {
+        const c = new Handelsregister({ apiKey: '' });
+        expect(c).toBeInstanceOf(Handelsregister);
+      } finally {
+        restoreEnv('HANDELSREGISTER_API_KEY', originalEnv);
+      }
     });
 
-    it('should throw error if no API key available', () => {
-      const originalEnv = process.env.HANDELSREGISTER_API_KEY;
+    it('should use HANDELSREGISTER_BEARER_TOKEN env var when set', () => {
+      const originalApiKey = process.env.HANDELSREGISTER_API_KEY;
+      const originalBearer = process.env.HANDELSREGISTER_BEARER_TOKEN;
       delete process.env.HANDELSREGISTER_API_KEY;
-      
-      expect(() => new Handelsregister({ apiKey: '' })).toThrow(AuthenticationError);
-      
-      process.env.HANDELSREGISTER_API_KEY = originalEnv;
+      process.env.HANDELSREGISTER_BEARER_TOKEN = 'env-bearer';
+
+      try {
+        const c = new Handelsregister({});
+        expect(c).toBeInstanceOf(Handelsregister);
+      } finally {
+        restoreEnv('HANDELSREGISTER_API_KEY', originalApiKey);
+        restoreEnv('HANDELSREGISTER_BEARER_TOKEN', originalBearer);
+      }
+    });
+
+    it('should throw error if no auth available', () => {
+      const originalApiKey = process.env.HANDELSREGISTER_API_KEY;
+      const originalBearer = process.env.HANDELSREGISTER_BEARER_TOKEN;
+      delete process.env.HANDELSREGISTER_API_KEY;
+      delete process.env.HANDELSREGISTER_BEARER_TOKEN;
+
+      try {
+        expect(() => new Handelsregister({ apiKey: '' })).toThrow(AuthenticationError);
+      } finally {
+        restoreEnv('HANDELSREGISTER_API_KEY', originalApiKey);
+        restoreEnv('HANDELSREGISTER_BEARER_TOKEN', originalBearer);
+      }
+    });
+  });
+
+  function restoreEnv(name: string, value: string | undefined) {
+    if (value === undefined) {
+      delete process.env[name];
+    } else {
+      process.env[name] = value;
+    }
+  }
+
+  describe('authentication wire format', () => {
+    const mockData: CompanyData = { entity_id: 'x', name: 'X' };
+
+    it('sends api key in x-api-key header, NOT in query string', async () => {
+      const scope = nock(BASE_URL, { reqheaders: { 'x-api-key': API_KEY } })
+        .get('/api/v1/fetch-organization')
+        .query((q) => q.api_key === undefined && q.q === 'X')
+        .reply(200, mockData);
+
+      await client.fetchOrganization('X');
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('sends Authorization: Bearer header when bearer token configured', async () => {
+      const bearerClient = new Handelsregister({
+        bearerToken: 'TOK',
+        cacheEnabled: false,
+      });
+
+      const scope = nock(BASE_URL, {
+        reqheaders: { Authorization: 'Bearer TOK' },
+        badheaders: ['x-api-key'],
+      })
+        .get('/api/v1/fetch-organization')
+        .query(true)
+        .reply(200, mockData);
+
+      await bearerClient.fetchOrganization('X');
+      expect(scope.isDone()).toBe(true);
     });
   });
 
@@ -71,37 +133,79 @@ describe('Handelsregister Client', () => {
       name: 'Test Company GmbH',
       legal_form: 'GmbH',
       status: 'active',
-      register_number: 'HRB 12345'
+      register_number: 'HRB 12345',
     };
 
     it('should fetch company data with string query', async () => {
-      nock(BASE_URL)
+      nock(BASE_URL, { reqheaders: { 'x-api-key': API_KEY } })
         .get('/api/v1/fetch-organization')
-        .query({ api_key: API_KEY, q: 'Test Company' })
+        .query({ q: 'Test Company' })
         .reply(200, mockCompanyData);
 
       const result = await client.fetchOrganization('Test Company');
       expect(result).toEqual(mockCompanyData);
     });
 
-    it('should fetch company data with search params', async () => {
-      // The client sends feature params as feature=value1&feature=value2
-      nock(BASE_URL)
+    it('should send features as repeated feature= params', async () => {
+      const scope = nock(BASE_URL, { reqheaders: { 'x-api-key': API_KEY } })
         .get('/api/v1/fetch-organization')
-        .query((actualQuery) => {
-          // Check that the query has the expected parameters
-          return actualQuery.api_key === API_KEY &&
-                 actualQuery.q === 'Test Company' &&
-                 actualQuery.ai_search === 'off';
+        .query((actual) => {
+          // nock parses repeated keys into an array
+          const features = ([] as string[]).concat(actual.feature || []);
+          return (
+            actual.q === 'Test Company' &&
+            features.includes('financial_kpi') &&
+            features.includes('related_persons')
+          );
         })
         .reply(200, mockCompanyData);
 
       const result = await client.fetchOrganization({
         q: 'Test Company',
         features: ['financial_kpi', 'related_persons'],
-        aiSearch: 'off'
       });
       expect(result).toEqual(mockCompanyData);
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should send ai_search=on-default when aiSearch is true', async () => {
+      const scope = nock(BASE_URL)
+        .get('/api/v1/fetch-organization')
+        .query((q) => q.ai_search === 'on-default')
+        .reply(200, mockCompanyData);
+
+      await client.fetchOrganization({ q: 'X', aiSearch: true });
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should send ai_search=on-default when aiSearch is the literal "on-default"', async () => {
+      const scope = nock(BASE_URL)
+        .get('/api/v1/fetch-organization')
+        .query((q) => q.ai_search === 'on-default')
+        .reply(200, mockCompanyData);
+
+      await client.fetchOrganization({ q: 'X', aiSearch: 'on-default' });
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should NOT send ai_search when aiSearch is false', async () => {
+      const scope = nock(BASE_URL)
+        .get('/api/v1/fetch-organization')
+        .query((q) => q.ai_search === undefined)
+        .reply(200, mockCompanyData);
+
+      await client.fetchOrganization({ q: 'X', aiSearch: false });
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('should send realtime_mode=handelsregister-default when realtimeMode is true', async () => {
+      const scope = nock(BASE_URL)
+        .get('/api/v1/fetch-organization')
+        .query((q) => q.realtime_mode === 'handelsregister-default')
+        .reply(200, mockCompanyData);
+
+      await client.fetchOrganization({ q: 'X', realtimeMode: true });
+      expect(scope.isDone()).toBe(true);
     });
 
     it('should throw ValidationError for empty query', async () => {
@@ -115,7 +219,9 @@ describe('Handelsregister Client', () => {
         .query(true)
         .reply(401, { error: 'Invalid API key' });
 
-      await expect(client.fetchOrganization('Test Company')).rejects.toThrow(AuthenticationError);
+      await expect(client.fetchOrganization('Test Company')).rejects.toThrow(
+        AuthenticationError,
+      );
     });
 
     it('should handle rate limit errors', async () => {
@@ -123,9 +229,11 @@ describe('Handelsregister Client', () => {
         .get('/api/v1/fetch-organization')
         .query(true)
         .reply(429, { error: 'Rate limit exceeded' })
-        .persist(); // Make sure nock doesn't get consumed by retries
+        .persist();
 
-      await expect(client.fetchOrganization('Test Company')).rejects.toThrow(RateLimitError);
+      await expect(client.fetchOrganization('Test Company')).rejects.toThrow(
+        RateLimitError,
+      );
     });
 
     it('should retry on server errors', async () => {
@@ -144,7 +252,7 @@ describe('Handelsregister Client', () => {
     it('should use cache when enabled', async () => {
       const cachedClient = new Handelsregister({
         apiKey: API_KEY,
-        cacheEnabled: true
+        cacheEnabled: true,
       });
 
       nock(BASE_URL)
@@ -152,13 +260,119 @@ describe('Handelsregister Client', () => {
         .query(true)
         .reply(200, mockCompanyData);
 
-      // First call
-      const result1 = await cachedClient.fetchOrganization('Test Company');
-      expect(result1).toEqual(mockCompanyData);
+      const r1 = await cachedClient.fetchOrganization('Test Company');
+      expect(r1).toEqual(mockCompanyData);
 
       // Second call should use cache (no new request)
-      const result2 = await cachedClient.fetchOrganization('Test Company');
-      expect(result2).toEqual(mockCompanyData);
+      const r2 = await cachedClient.fetchOrganization('Test Company');
+      expect(r2).toEqual(mockCompanyData);
+    });
+  });
+
+  describe('searchOrganizations', () => {
+    const mockResponse: SearchOrganizationsResponse = {
+      results: [
+        { entity_id: 'a', name: 'Alpha GmbH' },
+        { entity_id: 'b', name: 'Beta GmbH' },
+      ],
+      total: 2,
+      meta: { request_credit_cost: 1, credits_remaining: 99 },
+    };
+
+    it('returns results with totals', async () => {
+      nock(BASE_URL, { reqheaders: { 'x-api-key': API_KEY } })
+        .get('/api/v1/search-organizations')
+        .query({ q: 'tech', skip: 0, limit: 10 })
+        .reply(200, mockResponse);
+
+      const result = await client.searchOrganizations({ q: 'tech', skip: 0, limit: 10 });
+      expect(result.total).toBe(2);
+      expect(result.results).toHaveLength(2);
+    });
+
+    it('serializes filters as JSON', async () => {
+      const scope = nock(BASE_URL)
+        .get('/api/v1/search-organizations')
+        .query((q) => q.filters === JSON.stringify({ postal_code: '80331' }))
+        .reply(200, mockResponse);
+
+      await client.searchOrganizations({
+        q: 'tech',
+        filters: { postal_code: '80331' },
+      });
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('rejects too-short query', async () => {
+      await expect(client.searchOrganizations({ q: 'a' })).rejects.toThrow(
+        ValidationError,
+      );
+    });
+
+    it('rejects out-of-range limit', async () => {
+      await expect(
+        client.searchOrganizations({ q: 'tech', limit: 0 }),
+      ).rejects.toThrow(ValidationError);
+      await expect(
+        client.searchOrganizations({ q: 'tech', limit: 101 }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('rejects negative skip', async () => {
+      await expect(
+        client.searchOrganizations({ q: 'tech', skip: -1 }),
+      ).rejects.toThrow(ValidationError);
+    });
+  });
+
+  describe('fetchPerson', () => {
+    const mockPerson: PersonData = {
+      entity_id: 'p1',
+      name: 'Erika Mustermann',
+      bio: 'Founder',
+    };
+
+    it('sends person_q and organization_q', async () => {
+      const scope = nock(BASE_URL, { reqheaders: { 'x-api-key': API_KEY } })
+        .get('/api/v1/fetch-person')
+        .query({ person_q: 'Erika Mustermann', organization_q: 'Musterfirma GmbH' })
+        .reply(200, mockPerson);
+
+      const result = await client.fetchPerson({
+        personQ: 'Erika Mustermann',
+        organizationQ: 'Musterfirma GmbH',
+      });
+      expect(result).toEqual(mockPerson);
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('sends features as repeated feature= params', async () => {
+      const scope = nock(BASE_URL)
+        .get('/api/v1/fetch-person')
+        .query((actual) => {
+          const features = ([] as string[]).concat(actual.feature || []);
+          return features.includes('shareholdings');
+        })
+        .reply(200, mockPerson);
+
+      await client.fetchPerson({
+        personQ: 'Erika Mustermann',
+        organizationQ: 'Musterfirma GmbH',
+        features: ['shareholdings'],
+      });
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('rejects too-short personQ', async () => {
+      await expect(
+        client.fetchPerson({ personQ: 'a', organizationQ: 'Musterfirma GmbH' }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('rejects too-short organizationQ', async () => {
+      await expect(
+        client.fetchPerson({ personQ: 'Erika Mustermann', organizationQ: 'a' }),
+      ).rejects.toThrow(ValidationError);
     });
   });
 
@@ -166,18 +380,33 @@ describe('Handelsregister Client', () => {
     const mockPdfBuffer = Buffer.from('mock pdf content');
 
     it('should fetch document and return buffer', async () => {
-      nock(BASE_URL)
+      nock(BASE_URL, { reqheaders: { 'x-api-key': API_KEY } })
         .get('/api/v1/fetch-document')
         .query({
-          api_key: API_KEY,
           company_id: 'entity-123',
-          document_type: 'shareholders_list'
+          document_type: 'shareholders_list',
         })
         .reply(200, mockPdfBuffer, {
-          'Content-Type': 'application/pdf'
+          'Content-Type': 'application/pdf',
         });
 
       const result = await client.fetchDocument('entity-123', 'shareholders_list');
+      expect(result).toEqual(mockPdfBuffer);
+    });
+
+    it('accepts new articles_of_association doc type', async () => {
+      nock(BASE_URL)
+        .get('/api/v1/fetch-document')
+        .query({
+          company_id: 'entity-123',
+          document_type: 'articles_of_association',
+        })
+        .reply(200, mockPdfBuffer, { 'Content-Type': 'application/pdf' });
+
+      const result = await client.fetchDocument(
+        'entity-123',
+        'articles_of_association',
+      );
       expect(result).toEqual(mockPdfBuffer);
     });
 
@@ -187,7 +416,7 @@ describe('Handelsregister Client', () => {
 
     it('should validate document type', async () => {
       await expect(
-        client.fetchDocument('entity-123', 'invalid' as any)
+        client.fetchDocument('entity-123', 'invalid' as any),
       ).rejects.toThrow(ValidationError);
     });
 
@@ -197,9 +426,63 @@ describe('Handelsregister Client', () => {
         .query(true)
         .reply(404, { error: 'Document not found' });
 
-      await expect(
-        client.fetchDocument('entity-123', 'AD')
-      ).rejects.toThrow(HandelsregisterError);
+      await expect(client.fetchDocument('entity-123', 'AD')).rejects.toThrow(
+        HandelsregisterError,
+      );
+    });
+  });
+
+  describe('token management', () => {
+    it('createToken POSTs to /auth/tokens/create with snake_cased body', async () => {
+      const scope = nock(BASE_URL, { reqheaders: { 'x-api-key': API_KEY } })
+        .post('/api/v1/auth/tokens/create', {
+          token_name: 'my-token',
+          abilities: ['*'],
+          expires_at: '2026-12-31 23:59:59',
+        })
+        .reply(200, { token: 'NEW-TOKEN-VALUE' });
+
+      const result = await client.createToken({
+        tokenName: 'my-token',
+        abilities: ['*'],
+        expiresAt: '2026-12-31 23:59:59',
+      });
+      expect(result).toEqual({ token: 'NEW-TOKEN-VALUE' });
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('createToken rejects empty tokenName', async () => {
+      await expect(client.createToken({ tokenName: '' })).rejects.toThrow(
+        ValidationError,
+      );
+    });
+
+    it('listTokens GETs /auth/tokens', async () => {
+      nock(BASE_URL)
+        .get('/api/v1/auth/tokens')
+        .reply(200, { tokens: [{ id: 1, name: 't' }] });
+
+      const result = await client.listTokens();
+      expect(result.tokens).toHaveLength(1);
+    });
+
+    it('revokeToken DELETEs /auth/tokens/{id}', async () => {
+      const scope = nock(BASE_URL).delete('/api/v1/auth/tokens/42').reply(200, {});
+
+      const result = await client.revokeToken(42);
+      expect(result).toEqual({});
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('revokeToken rejects empty id', async () => {
+      await expect(client.revokeToken('')).rejects.toThrow(ValidationError);
+    });
+
+    it('revokeAllTokens DELETEs /auth/tokens', async () => {
+      const scope = nock(BASE_URL).delete('/api/v1/auth/tokens').reply(200, {});
+
+      await client.revokeAllTokens();
+      expect(scope.isDone()).toBe(true);
     });
   });
 
@@ -208,11 +491,11 @@ describe('Handelsregister Client', () => {
       const rateLimitedClient = new Handelsregister({
         apiKey: API_KEY,
         rateLimit: 0.1, // 100ms between requests
-        cacheEnabled: false
+        cacheEnabled: false,
       });
 
       const mockData = { entity_id: 'test', name: 'Test' };
-      
+
       nock(BASE_URL)
         .get('/api/v1/fetch-organization')
         .query(true)
@@ -220,10 +503,10 @@ describe('Handelsregister Client', () => {
         .reply(200, mockData);
 
       const start = Date.now();
-      
+
       await rateLimitedClient.fetchOrganization('Test 1');
       await rateLimitedClient.fetchOrganization('Test 2');
-      
+
       const duration = Date.now() - start;
       expect(duration).toBeGreaterThanOrEqual(100);
     });

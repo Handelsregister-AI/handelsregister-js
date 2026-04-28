@@ -1,30 +1,47 @@
 import { Handelsregister } from './client';
-import { 
-  CompanyData, 
-  SearchParams, 
-  Feature, 
+import {
+  CompanyData,
+  AiSearchMode,
+  RealtimeMode,
+  Feature,
   DocumentType,
   RelatedPerson,
   FinancialKPI,
   BalanceSheetAccount,
   ProfitLossAccount,
-  Publication
+  Publication,
+  ShareholderInfo,
+  UBOInfo,
+  ShareholdingsInfo,
+  NewsItem,
+  InsolvencyPublication,
+  WebsiteContent,
 } from './types';
 import { HandelsregisterConfig } from './types';
+
+export interface CompanyOptions {
+  features?: Feature[];
+  aiSearch?: AiSearchMode | boolean;
+  realtimeMode?: RealtimeMode | boolean;
+}
 
 export class Company {
   private client: Handelsregister;
   private data?: CompanyData;
   private searchQuery: string;
   private features?: Feature[];
+  private aiSearch?: AiSearchMode | boolean;
+  private realtimeMode?: RealtimeMode | boolean;
 
   constructor(
     searchQuery: string,
     configOrClient?: HandelsregisterConfig | string | Handelsregister,
-    options?: { features?: Feature[] }
+    options?: CompanyOptions,
   ) {
     this.searchQuery = searchQuery;
     this.features = options?.features;
+    this.aiSearch = options?.aiSearch;
+    this.realtimeMode = options?.realtimeMode;
 
     if (configOrClient instanceof Handelsregister) {
       this.client = configOrClient;
@@ -37,7 +54,9 @@ export class Company {
     if (!this.data) {
       this.data = await this.client.fetchOrganization({
         q: this.searchQuery,
-        features: this.features
+        features: this.features,
+        aiSearch: this.aiSearch,
+        realtimeMode: this.realtimeMode,
       });
     }
     return this.data;
@@ -321,6 +340,51 @@ export class Company {
 
   get publications(): Publication[] {
     return this.data?.publications || [];
+  }
+
+  // Annual financial statements
+  get annualFinancialStatements(): Array<{ year: number; [key: string]: any }> {
+    return this.data?.annual_financial_statements || [];
+  }
+
+  get annualFinancialStatementsHtml(): Array<{ year: number; [key: string]: any }> {
+    return this.data?.annual_financial_statements_html || [];
+  }
+
+  getAnnualFinancialStatementForYear(
+    year: number,
+    html: boolean = false,
+  ): { year: number; [key: string]: any } | undefined {
+    const list = html
+      ? this.data?.annual_financial_statements_html
+      : this.data?.annual_financial_statements;
+    return list?.find((s) => s.year === year);
+  }
+
+  // Ownership: shareholders / UBOs / shareholdings
+  get shareholders(): ShareholderInfo | undefined {
+    return this.data?.shareholders;
+  }
+
+  get ubos(): UBOInfo | undefined {
+    return this.data?.ubos;
+  }
+
+  get shareholdings(): ShareholdingsInfo | undefined {
+    return this.data?.shareholdings;
+  }
+
+  // News, insolvency, website content
+  get news(): NewsItem[] {
+    return this.data?.news || [];
+  }
+
+  get insolvencyPublications(): InsolvencyPublication[] {
+    return this.data?.insolvency_publications || [];
+  }
+
+  get websiteContent(): WebsiteContent | WebsiteContent[] | undefined {
+    return this.data?.website_content;
   }
 
   // Meta information

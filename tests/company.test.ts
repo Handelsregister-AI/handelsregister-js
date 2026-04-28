@@ -273,18 +273,105 @@ describe('Company Class', () => {
 
     it('should fetch document using entity id', async () => {
       const mockPdf = Buffer.from('mock pdf');
-      
-      nock(BASE_URL)
+
+      nock(BASE_URL, { reqheaders: { 'x-api-key': API_KEY } })
         .get('/api/v1/fetch-document')
         .query({
-          api_key: API_KEY,
           company_id: 'entity-123',
-          document_type: 'AD'
+          document_type: 'AD',
         })
         .reply(200, mockPdf);
 
       const result = await company.fetchDocument('AD');
       expect(result).toEqual(mockPdf);
+    });
+
+    it('should accept articles_of_association doc type via Company.fetchDocument', async () => {
+      const mockPdf = Buffer.from('articles');
+
+      nock(BASE_URL)
+        .get('/api/v1/fetch-document')
+        .query({
+          company_id: 'entity-123',
+          document_type: 'articles_of_association',
+        })
+        .reply(200, mockPdf);
+
+      const result = await company.fetchDocument('articles_of_association');
+      expect(result).toEqual(mockPdf);
+    });
+  });
+
+  describe('new accessors (shareholders/ubos/shareholdings/news/insolvency/website)', () => {
+    let company: Company;
+
+    const enrichedData: CompanyData = {
+      entity_id: 'enriched-1',
+      name: 'Enriched GmbH',
+      shareholders: {
+        entries: [
+          { display_name: 'Alice', percentage: 60, contribution_amount: 30000 },
+          { display_name: 'Bob', percentage: 40, contribution_amount: 20000 },
+        ],
+        total_capital: 50000,
+      },
+      ubos: {
+        resolved: [{ name: 'Alice', percentage: 60, type: 'natural', resolved: true }],
+      },
+      shareholdings: {
+        current: [{ organization_name: 'SubCo GmbH', percentage: 100 }],
+      },
+      news: [{ title: 'Funding round closed', date: '2026-03-01' }],
+      insolvency_publications: [
+        { date: '2025-11-12', court: 'AG München', case_number: '123/25' },
+      ],
+      website_content: { url: 'https://example.com', content: 'About us...' },
+      annual_financial_statements: [{ year: 2023, revenue: 1_000_000 }],
+      annual_financial_statements_html: [{ year: 2023, html: '<p>Report</p>' }],
+    };
+
+    beforeEach(async () => {
+      company = new Company('Enriched', API_KEY);
+      nock(BASE_URL).get('/api/v1/fetch-organization').query(true).reply(200, enrichedData);
+      await company.getName();
+    });
+
+    it('exposes shareholders', () => {
+      expect(company.shareholders?.entries).toHaveLength(2);
+      expect(company.shareholders?.total_capital).toBe(50000);
+    });
+
+    it('exposes UBOs', () => {
+      expect(company.ubos?.resolved?.[0].name).toBe('Alice');
+    });
+
+    it('exposes shareholdings', () => {
+      expect(company.shareholdings?.current?.[0].organization_name).toBe('SubCo GmbH');
+    });
+
+    it('exposes news', () => {
+      expect(company.news).toHaveLength(1);
+      expect(company.news[0].title).toBe('Funding round closed');
+    });
+
+    it('exposes insolvency publications', () => {
+      expect(company.insolvencyPublications).toHaveLength(1);
+      expect(company.insolvencyPublications[0].court).toBe('AG München');
+    });
+
+    it('exposes websiteContent', () => {
+      expect((company.websiteContent as any).url).toBe('https://example.com');
+    });
+
+    it('exposes annualFinancialStatementsHtml separately from markdown variant', () => {
+      expect(company.annualFinancialStatements).toHaveLength(1);
+      expect(company.annualFinancialStatementsHtml).toHaveLength(1);
+      expect(company.getAnnualFinancialStatementForYear(2023)).toBeDefined();
+      expect(company.getAnnualFinancialStatementForYear(2023, true)).toEqual({
+        year: 2023,
+        html: '<p>Report</p>',
+      });
+      expect(company.getAnnualFinancialStatementForYear(2099)).toBeUndefined();
     });
   });
 

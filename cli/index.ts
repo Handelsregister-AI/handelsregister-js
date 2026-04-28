@@ -4,11 +4,10 @@ import { Command } from 'commander';
 import * as chalk from 'chalk';
 import * as Table from 'cli-table3';
 import * as dotenv from 'dotenv';
-import * as path from 'path';
-import * as fs from 'fs';
-import { Handelsregister, Company } from '../src';
-import { Feature, DocumentType } from '../src/types';
+import { Handelsregister, Company, Person } from '../src';
+import { Feature, DocumentType, PersonFeature } from '../src/types';
 import { detectFileType } from '../src/utils/fileHandler';
+import { version } from '../src/version';
 
 // Load environment variables
 dotenv.config();
@@ -18,33 +17,47 @@ const program = new Command();
 program
   .name('handelsregister')
   .description('CLI for accessing German company registry (Handelsregister) data')
-  .version('0.1.0')
+  .version(version)
   .option('-k, --api-key <key>', 'API key (defaults to HANDELSREGISTER_API_KEY env var)')
+  .option('-b, --bearer-token <token>', 'Bearer token (defaults to HANDELSREGISTER_BEARER_TOKEN env var)')
   .option('--no-color', 'Disable colored output');
 
-// Fetch command
+function buildClient(): Handelsregister {
+  const apiKey = program.opts().apiKey || process.env.HANDELSREGISTER_API_KEY;
+  const bearerToken =
+    program.opts().bearerToken || process.env.HANDELSREGISTER_BEARER_TOKEN;
+
+  if (!apiKey && !bearerToken) {
+    console.error(
+      chalk.red(
+        'Error: API key or bearer token is required. Set HANDELSREGISTER_API_KEY / HANDELSREGISTER_BEARER_TOKEN or use --api-key / --bearer-token',
+      ),
+    );
+    process.exit(1);
+  }
+
+  return new Handelsregister({ apiKey, bearerToken });
+}
+
+// ----- fetch -----
+
 program
   .command('fetch <query>')
   .description('Fetch company information')
   .option('-f, --feature <features...>', 'Features to include', [])
   .option('--json', 'Output as JSON')
   .option('--no-ai-search', 'Disable AI search')
+  .option('--realtime', 'Enable live Handelsregister lookup (+10 credits)')
   .action(async (query: string, options: any) => {
     try {
-      const apiKey = program.opts().apiKey || process.env.HANDELSREGISTER_API_KEY;
-      
-      if (!apiKey) {
-        console.error(chalk.red('Error: API key is required. Set HANDELSREGISTER_API_KEY or use --api-key'));
-        process.exit(1);
-      }
-
-      const client = new Handelsregister(apiKey);
+      const client = buildClient();
       const features = options.feature as Feature[];
-      
+
       const data = await client.fetchOrganization({
         q: query,
         features,
-        aiSearch: options.aiSearch === false ? 'off' : 'on'
+        aiSearch: options.aiSearch === false ? 'off' : true,
+        realtimeMode: options.realtime ? true : false,
       });
 
       if (options.json) {
@@ -58,31 +71,140 @@ program
     }
   });
 
-// Document command
+// ----- search -----
+
+program
+  .command('search <query>')
+  .description('Search organizations with optional filters and pagination')
+  .option('--postal-code <code>', 'Filter by postal code')
+  .option('--limit <n>', 'Results per page (1..100)', '10')
+  .option('--skip <n>', 'Pagination offset', '0')
+  .option('--json', 'Output as JSON')
+  .action(async (query: string, options: any) => {
+    try {
+      const client = buildClient();
+      const filters: Record<string, any> = {};
+      if (options.postalCode) filters.postal_code = options.postalCode;
+
+      const result = await client.searchOrganizations({
+        q: query,
+        skip: parseInt(options.skip, 10),
+        limit: parseInt(options.limit, 10),
+        filters: Object.keys(filters).length > 0 ? filters : undefined,
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      console.log(chalk.bold.blue(`\nFound ${result.total} matching companies (showing ${result.results.length}):\n`));
+      const table = new Table({
+        head: ['Name', 'Court', 'Register #', 'City'],
+        style: { head: ['blue'] },
+      });
+      result.results.forEach((r) => {
+        table.push([
+          r.name || '-',
+          r.registration?.court || '-',
+          r.registration?.register_number || '-',
+          r.address?.city || '-',
+        ]);
+      });
+      console.log(table.toString());
+      if (result.meta?.credits_remaining !== undefined) {
+        console.log(chalk.gray(`Credits remaining: ${result.meta.credits_remaining}`));
+      }
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// ----- person -----
+
+program
+  .command('person')
+  .description('Fetch a person profile')
+  .requiredOption('-p, --person <name>', 'Full name of the person')
+  .requiredOption('-o, --organization <name>', 'Company context for disambiguation')
+  .option('-f, --feature <features...>', 'Features to include (e.g., shareholdings)', [])
+  .option('--json', 'Output as JSON')
+  .action(async (options: any) => {
+    try {
+      const client = buildClient();
+      const person = new Person(options.person, options.organization, client, {
+        features: options.feature as PersonFeature[],
+      });
+      const data = await person.getRawData();
+
+      if (options.json) {
+        console.log(JSON.stringify(data, null, 2));
+        return;
+      }
+
+      console.log(chalk.bold.blue(`\n=== ${data.name || options.person} ===\n`));
+      const info = new Table();
+      info.push(
+        ['Entity ID', data.entity_id || '-'],
+        ['Born', data.birth_date || '-'],
+        ['Home', data.location?.home?.city || '-'],
+      );
+      console.log(info.toString());
+
+      if (data.bio) {
+        console.log(chalk.bold.blue('\n=== Bio ==='));
+        console.log(data.bio);
+      }
+
+      if (person.handelsregisterRoles.length > 0) {
+        console.log(chalk.bold.blue('\n=== Handelsregister Roles ==='));
+        const rolesTable = new Table({
+          head: ['Role', 'Organization', 'Current'],
+          style: { head: ['blue'] },
+        });
+        person.handelsregisterRoles.forEach((r: any) => {
+          rolesTable.push([
+            r.label || '-',
+            r.organization || '-',
+            r.is_current ? 'Yes' : 'No',
+          ]);
+        });
+        console.log(rolesTable.toString());
+      }
+
+      if (data.meta?.credits_remaining !== undefined) {
+        console.log(chalk.gray(`\nCredits remaining: ${data.meta.credits_remaining}`));
+      }
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// ----- document -----
+
 program
   .command('document <query>')
   .description('Download company documents')
-  .requiredOption('-t, --type <type>', 'Document type (shareholders_list, AD, CD)')
+  .requiredOption(
+    '-t, --type <type>',
+    'Document type (shareholders_list, articles_of_association, AD, CD)',
+  )
   .option('-o, --output <file>', 'Output file path')
   .action(async (query: string, options: any) => {
     try {
-      const apiKey = program.opts().apiKey || process.env.HANDELSREGISTER_API_KEY;
-      
-      if (!apiKey) {
-        console.error(chalk.red('Error: API key is required. Set HANDELSREGISTER_API_KEY or use --api-key'));
-        process.exit(1);
-      }
-
-      const company = new Company(query, apiKey);
+      const client = buildClient();
+      const company = new Company(query, client);
       const entityId = await company.getId();
-      
+
       const outputFile = options.output || `${entityId}_${options.type}.pdf`;
-      
+
       console.log(chalk.blue(`Fetching document for: ${await company.getName()}`));
       console.log(chalk.gray(`Document type: ${options.type}`));
-      
+
       await company.fetchDocument(options.type as DocumentType, outputFile);
-      
+
       console.log(chalk.green(`✓ Document saved to: ${outputFile}`));
     } catch (error: any) {
       console.error(chalk.red(`Error: ${error.message}`));
@@ -90,24 +212,122 @@ program
     }
   });
 
-// Enrich command
+// ----- token management -----
+
+program
+  .command('token-create <name>')
+  .description('Create a new bearer token')
+  .option('-a, --abilities <list>', 'Comma-separated abilities (e.g., "*")')
+  .option('--expires-at <ts>', 'Expiry timestamp "YYYY-MM-DD HH:MM:SS"')
+  .action(async (name: string, options: any) => {
+    try {
+      const client = buildClient();
+      const abilities = options.abilities
+        ? options.abilities.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : undefined;
+      const result = await client.createToken({
+        tokenName: name,
+        abilities,
+        expiresAt: options.expiresAt,
+      });
+      console.log(chalk.green('✓ Token created'));
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('token-list')
+  .description('List all bearer tokens')
+  .option('--json', 'Output as JSON')
+  .action(async (options: any) => {
+    try {
+      const client = buildClient();
+      const result = await client.listTokens();
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+        return;
+      }
+
+      const tokens = (result.tokens || []) as any[];
+      if (tokens.length === 0) {
+        console.log(chalk.gray('No tokens.'));
+        return;
+      }
+      const table = new Table({
+        head: ['ID', 'Name', 'Expires At', 'Created At'],
+        style: { head: ['blue'] },
+      });
+      tokens.forEach((t) => {
+        table.push([
+          String(t.id ?? '-'),
+          t.name || '-',
+          t.expires_at || '-',
+          t.created_at || '-',
+        ]);
+      });
+      console.log(table.toString());
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('token-revoke <id>')
+  .description('Revoke a specific bearer token by ID')
+  .action(async (id: string) => {
+    try {
+      const client = buildClient();
+      await client.revokeToken(id);
+      console.log(chalk.green(`✓ Token ${id} revoked`));
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('token-revoke-all')
+  .description('Revoke ALL bearer tokens for the authenticated account')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .action(async (options: any) => {
+    try {
+      if (!options.yes) {
+        console.error(
+          chalk.yellow(
+            'Refusing to revoke all tokens without --yes. Pass --yes to confirm.',
+          ),
+        );
+        process.exit(1);
+      }
+      const client = buildClient();
+      await client.revokeAllTokens();
+      console.log(chalk.green('✓ All tokens revoked'));
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+// ----- enrich (existing) -----
+
 program
   .command('enrich <file>')
   .description('Enrich data file with company information')
   .option('-i, --input <type>', 'Input file type (json, csv, xlsx) - auto-detected if not specified')
-  .option('-q, --query-properties <mappings...>', 'Property mappings in format prop1=column1 prop2=column2')
+  .option(
+    '-q, --query-properties <mappings...>',
+    'Property mappings in format prop1=column1 prop2=column2',
+  )
   .option('-f, --feature <features...>', 'Features to include', [])
   .option('-s, --snapshot-dir <dir>', 'Directory for snapshot files')
   .option('--snapshot-interval <n>', 'Save snapshot every N items', '10')
   .action(async (file: string, options: any) => {
     try {
-      const apiKey = program.opts().apiKey || process.env.HANDELSREGISTER_API_KEY;
-      
-      if (!apiKey) {
-        console.error(chalk.red('Error: API key is required. Set HANDELSREGISTER_API_KEY or use --api-key'));
-        process.exit(1);
-      }
-
       if (!options.queryProperties || options.queryProperties.length === 0) {
         console.error(chalk.red('Error: --query-properties is required'));
         process.exit(1);
@@ -122,7 +342,7 @@ program
         }
       }
 
-      const client = new Handelsregister(apiKey);
+      const client = buildClient();
       const inputType = options.input || detectFileType(file);
       const features = options.feature as Feature[];
 
@@ -136,8 +356,8 @@ program
         inputType,
         queryProperties,
         snapshotDir: options.snapshotDir,
-        snapshotInterval: parseInt(options.snapshotInterval),
-        params: features.length > 0 ? { q: '', features } : {}
+        snapshotInterval: parseInt(options.snapshotInterval, 10),
+        params: features.length > 0 ? { q: '', features } : {},
       });
 
       console.log(chalk.green('\n✓ Enrichment completed!'));
@@ -149,15 +369,15 @@ program
         console.log(chalk.yellow('\nErrors:'));
         const errorTable = new Table({
           head: ['Row', 'Error'],
-          style: { head: ['yellow'] }
+          style: { head: ['yellow'] },
         });
-        
-        result.errors.slice(0, 10).forEach(err => {
+
+        result.errors.slice(0, 10).forEach((err) => {
           errorTable.push([err.row, err.error]);
         });
-        
+
         console.log(errorTable.toString());
-        
+
         if (result.errors.length > 10) {
           console.log(chalk.gray(`... and ${result.errors.length - 10} more errors`));
         }
@@ -168,7 +388,8 @@ program
     }
   });
 
-// Helper function to display company data
+// ----- helpers -----
+
 function displayCompanyData(data: any): void {
   console.log(chalk.bold.blue('\n=== Company Information ===\n'));
 
@@ -179,8 +400,8 @@ function displayCompanyData(data: any): void {
     ['Entity ID', data.entity_id || '-'],
     ['Status', data.status || '-'],
     ['Legal Form', data.legal_form || '-'],
-    ['Court', data.court || '-'],
-    ['Register Number', data.register_number || '-']
+    ['Court', data.court || data.registration?.court || '-'],
+    ['Register Number', data.register_number || data.registration?.register_number || '-'],
   );
   console.log(basicTable.toString());
 
@@ -192,7 +413,7 @@ function displayCompanyData(data: any): void {
       ['Street', data.address.street || '-'],
       ['Postal Code', data.address.postal_code || '-'],
       ['City', data.address.city || '-'],
-      ['Country', data.address.country_code || '-']
+      ['Country', data.address.country_code || data.address.country || '-'],
     );
     console.log(addressTable.toString());
   }
@@ -212,11 +433,13 @@ function displayCompanyData(data: any): void {
     console.log(chalk.bold.blue('\n=== Current Management ==='));
     const personsTable = new Table({
       head: ['Name', 'Role'],
-      style: { head: ['blue'] }
+      style: { head: ['blue'] },
     });
-    
+
     data.related_persons.current.forEach((person: any) => {
-      personsTable.push([person.name, person.role]);
+      const role =
+        typeof person.role === 'string' ? person.role : person.role?.designation || '-';
+      personsTable.push([person.name, role]);
     });
     console.log(personsTable.toString());
   }
@@ -226,15 +449,15 @@ function displayCompanyData(data: any): void {
     console.log(chalk.bold.blue('\n=== Financial KPIs ==='));
     const kpiTable = new Table({
       head: ['Year', 'Revenue', 'Profit', 'Employees'],
-      style: { head: ['blue'] }
+      style: { head: ['blue'] },
     });
-    
+
     data.financial_kpi.slice(-3).forEach((kpi: any) => {
       kpiTable.push([
         kpi.year,
         kpi.revenue ? `€${kpi.revenue.toLocaleString()}` : '-',
         kpi.profit ? `€${kpi.profit.toLocaleString()}` : '-',
-        kpi.employees || '-'
+        kpi.employees || '-',
       ]);
     });
     console.log(kpiTable.toString());

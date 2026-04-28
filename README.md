@@ -33,9 +33,11 @@ console.log(company.registerNumber);   // "HRB 251311"
 
 ## Configuration
 
-### API Key
+### Authentication
 
-You can provide your API key in several ways:
+The SDK supports two authentication methods. The chosen credential is sent as an HTTP header (`x-api-key` or `Authorization: Bearer …`); credentials never appear in URLs.
+
+#### API key (default)
 
 1. **Environment variable** (recommended):
    ```bash
@@ -57,6 +59,17 @@ You can provide your API key in several ways:
    });
    ```
 
+#### Bearer token
+
+For fine-grained, expirable credentials, use a bearer token. When both are provided, the bearer token takes precedence.
+
+```javascript
+const client = new Handelsregister({ bearerToken: 'your-bearer-token' });
+// or via env var: HANDELSREGISTER_BEARER_TOKEN=your-bearer-token
+```
+
+You can mint and revoke tokens with the `createToken` / `listTokens` / `revokeToken` / `revokeAllTokens` methods (see Token Management below).
+
 ## API Reference
 
 ### Handelsregister Client
@@ -69,9 +82,40 @@ Search and retrieve company information.
 const data = await client.fetchOrganization({
   q: 'KONUX GmbH München',
   features: ['related_persons', 'financial_kpi'],
-  aiSearch: 'on'  // or 'off'
+  aiSearch: true,            // sends ai_search=on-default; pass false to disable
+  realtimeMode: false        // set to true for a live Handelsregister lookup (+10 credits)
 });
 ```
+
+The `aiSearch` option accepts a `boolean` or the literal string `'on-default' | 'off'`. The `realtimeMode` option accepts a `boolean` or the literal string `'handelsregister-default'`.
+
+#### `searchOrganizations(params)`
+
+Paginated search with optional filters.
+
+```javascript
+const result = await client.searchOrganizations({
+  q: 'tech',
+  skip: 0,
+  limit: 20,                     // 1..100
+  filters: { postal_code: '80331' }
+});
+console.log(result.total, result.results.length);
+```
+
+#### `fetchPerson(params)`
+
+Look up a person profile by name with company context. Always uses AI enrichment (15 base credits).
+
+```javascript
+const person = await client.fetchPerson({
+  personQ: 'Erika Mustermann',
+  organizationQ: 'Musterfirma GmbH',
+  features: ['shareholdings']    // optional, +5 credits when data returned
+});
+```
+
+Use the `Person` class for lazy-loading and convenient property access (see below).
 
 #### `fetchDocument(companyId, documentType, outputFile?)`
 
@@ -86,9 +130,30 @@ await client.fetchDocument('entity123', 'AD', './document.pdf');
 ```
 
 Document types:
-- `shareholders_list` - List of shareholders
+- `shareholders_list` - List of shareholders (Gesellschafterliste)
+- `articles_of_association` - Articles / bylaws (Gesellschaftsvertrag / Satzung)
 - `AD` - Current company data (Aktuelle Daten)
 - `CD` - Historical data (Chronologische Daten)
+
+### Token Management
+
+```javascript
+// Create a long-lived token
+const { token } = await client.createToken({
+  tokenName: 'ci-pipeline',
+  abilities: ['*'],
+  expiresAt: '2027-01-01 00:00:00'
+});
+
+// List all tokens
+const { tokens } = await client.listTokens();
+
+// Revoke one
+await client.revokeToken(tokens[0].id);
+
+// Revoke all (use with care)
+await client.revokeAllTokens();
+```
 
 #### `enrich(options)`
 
@@ -163,15 +228,45 @@ handelsregister enrich companies.csv \
   --feature related_persons --feature financial_kpi
 ```
 
+### Person Class
+
+```javascript
+const { Person } = require('handelsregister');
+
+const person = new Person('Erika Mustermann', 'Musterfirma GmbH', apiKey, {
+  features: ['shareholdings']
+});
+
+await person.getRawData();    // triggers the API call
+console.log(person.name);
+console.log(person.bio);
+console.log(person.handelsregisterRoles);
+console.log(person.currentHandelsregisterRoles);
+console.log(person.shareholdings);
+```
+
 ## Available Features
 
 When fetching company data, you can request additional features:
 
+Core:
 - `related_persons` - Management and executives
 - `financial_kpi` - Financial key performance indicators
 - `balance_sheet_accounts` - Balance sheet data
 - `profit_and_loss_account` - P&L statement data
 - `publications` - Official publications
+- `annual_financial_statements` - Full annual reports (Markdown)
+- `annual_financial_statements__html` - Full annual reports (HTML)
+- `insolvency_publications` - Insolvency court notices
+
+Ownership:
+- `shareholders` - Shareholder list with capital contributions
+- `ubos` - Ultimate beneficial owners
+- `shareholdings` - Outbound shareholdings the company holds in others
+
+Enrichment:
+- `news` - News articles about the company
+- `website_content` - Structured company website content (requires `aiSearch: true`)
 
 ## Error Handling
 
@@ -216,6 +311,9 @@ See the `examples/` directory for more detailed examples:
 
 - `basic-usage.js` - Basic client usage
 - `company-class.js` - Using the Company wrapper
+- `search.js` - Paginated search with filters
+- `person.js` - Person lookup using the `Person` class
+- `token-management.js` - Create / list / revoke bearer tokens
 - `enrichment.js` - Batch data enrichment
 - `typescript-example.ts` - TypeScript example
 
