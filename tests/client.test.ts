@@ -5,6 +5,10 @@ import {
   ValidationError,
   RateLimitError,
   HandelsregisterError,
+  PaymentRequiredError,
+  ForbiddenError,
+  NotFoundError,
+  RequestTimeoutError,
 } from '../src/errors';
 import { CompanyData, PersonData, SearchOrganizationsResponse } from '../src/types';
 
@@ -168,6 +172,30 @@ describe('Handelsregister Client', () => {
       expect(scope.isDone()).toBe(true);
     });
 
+    it('supports mergers_and_acquisitions as a feature', async () => {
+      const scope = nock(BASE_URL)
+        .get('/api/v1/fetch-organization')
+        .query(
+          (query) =>
+            query.q === 'Test Company' &&
+            query.feature === 'mergers_and_acquisitions',
+        )
+        .reply(200, {
+          ...mockCompanyData,
+          mergers_and_acquisitions: {
+            transactions: [],
+            control: { controlled_by: [], controls: [], former: [] },
+            summary: { total_transactions: 0 },
+          },
+        });
+
+      await client.fetchOrganization({
+        q: 'Test Company',
+        features: ['mergers_and_acquisitions'],
+      });
+      expect(scope.isDone()).toBe(true);
+    });
+
     it('should send ai_search=on-default when aiSearch is true', async () => {
       const scope = nock(BASE_URL)
         .get('/api/v1/fetch-organization')
@@ -303,6 +331,48 @@ describe('Handelsregister Client', () => {
       expect(scope.isDone()).toBe(true);
     });
 
+    it('supports a filter-only search without q', async () => {
+      const filters = {
+        legal_form_code: ['GmbH', 'UG'],
+        active: true,
+        pl_revenue: { gte: 1_000_000, lte: 5_000_000 },
+      };
+      const scope = nock(BASE_URL)
+        .get('/api/v1/search-organizations')
+        .query(
+          (query) =>
+            query.q === undefined &&
+            query.limit === '30' &&
+            query.filters === JSON.stringify(filters),
+        )
+        .reply(200, mockResponse);
+
+      await client.searchOrganizations({ filters, limit: 30 });
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('sends ai_mode=on-default when search AI mode is enabled', async () => {
+      const scope = nock(BASE_URL)
+        .get('/api/v1/search-organizations')
+        .query(
+          (query) =>
+            query.q === 'tech' && query.ai_mode === 'on-default',
+        )
+        .reply(200, mockResponse);
+
+      await client.searchOrganizations({ q: 'tech', aiMode: true });
+      expect(scope.isDone()).toBe(true);
+    });
+
+    it('requires q or at least one filter', async () => {
+      await expect(client.searchOrganizations({})).rejects.toThrow(
+        ValidationError,
+      );
+      await expect(
+        client.searchOrganizations({ filters: {} }),
+      ).rejects.toThrow(ValidationError);
+    });
+
     it('rejects too-short query', async () => {
       await expect(client.searchOrganizations({ q: 'a' })).rejects.toThrow(
         ValidationError,
@@ -314,13 +384,29 @@ describe('Handelsregister Client', () => {
         client.searchOrganizations({ q: 'tech', limit: 0 }),
       ).rejects.toThrow(ValidationError);
       await expect(
-        client.searchOrganizations({ q: 'tech', limit: 101 }),
+        client.searchOrganizations({ q: 'tech', limit: 31 }),
       ).rejects.toThrow(ValidationError);
     });
 
     it('rejects negative skip', async () => {
       await expect(
         client.searchOrganizations({ q: 'tech', skip: -1 }),
+      ).rejects.toThrow(ValidationError);
+    });
+
+    it('validates coordinate radius filters', async () => {
+      await expect(
+        client.searchOrganizations({
+          filters: { location_max_distance_km: 10 },
+        }),
+      ).rejects.toThrow(ValidationError);
+      await expect(
+        client.searchOrganizations({
+          filters: {
+            location_coordinates: { latitude: 48.13, longitude: 11.58 },
+            location_max_distance_km: 101,
+          },
+        }),
       ).rejects.toThrow(ValidationError);
     });
   });
@@ -410,6 +496,29 @@ describe('Handelsregister Client', () => {
       expect(result).toEqual(mockPdfBuffer);
     });
 
+    it('accepts SI and exposes XML response metadata', async () => {
+      const xml = Buffer.from('<?xml version="1.0"?><root/>');
+      nock(BASE_URL)
+        .get('/api/v1/fetch-document')
+        .query({
+          company_id: 'entity-123',
+          document_type: 'SI',
+        })
+        .reply(200, xml, {
+          'Content-Type': 'application/xml; charset=utf-8',
+          'Content-Disposition': 'attachment; filename="company.xml"',
+        });
+
+      const result = await client.fetchDocumentWithMetadata({
+        companyId: 'entity-123',
+        documentType: 'SI',
+      });
+      expect(result.data).toEqual(xml);
+      expect(result.documentType).toBe('SI');
+      expect(result.contentType).toContain('application/xml');
+      expect(result.fileName).toBe('company.xml');
+    });
+
     it('should validate company ID', async () => {
       await expect(client.fetchDocument('', 'AD')).rejects.toThrow(ValidationError);
     });
@@ -483,6 +592,65 @@ describe('Handelsregister Client', () => {
 
       await client.revokeAllTokens();
       expect(scope.isDone()).toBe(true);
+    });
+  });
+
+  describe('documented API errors', () => {
+    it.each([
+      [
+        402,
+        { meta: { message: 'Insufficient credits' } },
+        PaymentRequiredError,
+      ],
+      [
+        403,
+        {
+          error: 'subscription_required',
+          meta: { message: 'An active subscription is required' },
+        },
+        ForbiddenError,
+      ],
+      [
+        404,
+        { detail: [{ msg: 'Organization does not exist' }] },
+        NotFoundError,
+      ],
+      [408, 'Request Timeout', RequestTimeoutError],
+    ])(
+      'maps HTTP %s to a specific SDK error',
+      async (status, response, ExpectedError) => {
+        nock(BASE_URL)
+          .get('/api/v1/fetch-organization')
+          .query(true)
+          .reply(status as number, response);
+
+        await expect(client.fetchOrganization('Missing')).rejects.toThrow(
+          ExpectedError as typeof Error,
+        );
+      },
+    );
+
+    it('preserves the subscription error code', async () => {
+      nock(BASE_URL)
+        .get('/api/v1/fetch-person')
+        .query(true)
+        .reply(403, {
+          error: 'subscription_required',
+          meta: { message: 'fetch-person requires a subscription' },
+        });
+
+      try {
+        await client.fetchPerson({
+          personQ: 'Erika Mustermann',
+          organizationQ: 'Musterfirma GmbH',
+        });
+        throw new Error('Expected fetchPerson to fail');
+      } catch (error) {
+        expect(error).toBeInstanceOf(ForbiddenError);
+        expect((error as ForbiddenError).errorCode).toBe(
+          'subscription_required',
+        );
+      }
     });
   });
 

@@ -25,15 +25,25 @@ async function main() {
     console.log('\nHandelsregister roles:');
     person.handelsregisterRoles.forEach((r) => {
       console.log(
-        `  - ${r.label || '?'} @ ${r.organization || '?'}${r.is_current ? ' (current)' : ''}`,
+        `  - ${r.label || '?'} @ ${r.name || r.organization || '?'}${
+          !r.end_date ? ' (current)' : ''
+        }`,
       );
     });
   }
 
-  if (person.shareholdings?.current?.length) {
+  const currentHoldings =
+    person.shareholdings?.holdings?.current ||
+    person.shareholdings?.current ||
+    [];
+  if (currentHoldings.length) {
     console.log('\nCurrent shareholdings:');
-    person.shareholdings.current.forEach((s) => {
-      console.log(`  - ${s.organization_name}: ${s.percentage ?? '?'}%`);
+    currentHoldings.forEach((s) => {
+      console.log(
+        `  - ${s.organization?.name || s.organization_name}: ${
+          s.ownership?.percentage ?? s.percentage ?? '?'
+        }%`,
+      );
     });
   }
 

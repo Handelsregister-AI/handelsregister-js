@@ -16,6 +16,10 @@ import {
   NewsItem,
   InsolvencyPublication,
   WebsiteContent,
+  Coordinates,
+  RepresentationScheme,
+  MergersAndAcquisitionsInfo,
+  AnnualFinancialStatement,
 } from './types';
 import { HandelsregisterConfig } from './types';
 
@@ -158,27 +162,36 @@ export class Company {
   async getAddress(): Promise<string | undefined> {
     const data = await this.ensureData();
     if (!data.address) return undefined;
-    
+
+    const streetLine = [data.address.street, data.address.house_number]
+      .filter(Boolean)
+      .join(' ');
     const parts = [
-      data.address.street,
+      streetLine || undefined,
       data.address.postal_code,
       data.address.city,
-      data.address.country_code
+      data.address.country || data.address.country_code
     ].filter(Boolean);
-    
+
     return parts.length > 0 ? parts.join(', ') : undefined;
   }
 
   get address(): string | undefined {
     if (!this.data?.address) return undefined;
-    
-    const parts = [
+
+    const streetLine = [
       this.data.address.street,
+      this.data.address.house_number,
+    ]
+      .filter(Boolean)
+      .join(' ');
+    const parts = [
+      streetLine || undefined,
       this.data.address.postal_code,
       this.data.address.city,
-      this.data.address.country_code
+      this.data.address.country || this.data.address.country_code
     ].filter(Boolean);
-    
+
     return parts.length > 0 ? parts.join(', ') : undefined;
   }
 
@@ -195,24 +208,34 @@ export class Company {
   }
 
   get countryCode(): string | undefined {
-    return this.data?.address?.country_code;
+    return this.data?.address?.country_code || this.data?.address?.country;
   }
 
-  get coordinates(): { lat: number; lon: number } | undefined {
+  get coordinates(): Coordinates | undefined {
     return this.data?.address?.coordinates;
   }
 
   // Contact information
   get website(): string | undefined {
-    return this.data?.website;
+    return this.data?.contact_data?.website || this.data?.website;
   }
 
   get phoneNumber(): string | undefined {
-    return this.data?.phone_number;
+    return this.data?.contact_data?.phone_number || this.data?.phone_number;
   }
 
   get email(): string | undefined {
-    return this.data?.email;
+    return this.data?.contact_data?.email || this.data?.email;
+  }
+
+  get representationScheme(): RepresentationScheme | undefined {
+    return this.data?.representation_scheme;
+  }
+
+  async getRepresentationScheme(): Promise<
+    RepresentationScheme | undefined
+  > {
+    return (await this.ensureData()).representation_scheme;
   }
 
   // Business information
@@ -224,7 +247,7 @@ export class Company {
     return this.data?.products_and_services;
   }
 
-  get industryClassification(): string | undefined {
+  get industryClassification(): string | Record<string, unknown> | undefined {
     return this.data?.industry_classification;
   }
 
@@ -265,11 +288,28 @@ export class Company {
     ];
     
     return allPersons.filter(person => {
-      const personRole = typeof person.role === 'string' 
-        ? person.role 
-        : person.role?.designation || '';
+      const personRole = this.getRoleSearchText(person.role);
       return personRole.toLowerCase().includes(role.toLowerCase());
     });
+  }
+
+  private getRoleSearchText(role: RelatedPerson['role']): string {
+    if (typeof role === 'string') return role;
+    if ('designation' in role && typeof role.designation === 'string') {
+      return role.designation;
+    }
+
+    const values: string[] = [];
+    for (const locale of [role.de, role.en]) {
+      if (typeof locale === 'string') {
+        values.push(locale);
+      } else if (locale && typeof locale === 'object') {
+        const localized = locale as Record<string, unknown>;
+        if (typeof localized.long === 'string') values.push(localized.long);
+        if (typeof localized.short === 'string') values.push(localized.short);
+      }
+    }
+    return values.join(' ');
   }
 
   // Financial data
@@ -335,28 +375,33 @@ export class Company {
   // Publications
   async getPublications(): Promise<Publication[]> {
     const data = await this.ensureData();
-    return data.publications || [];
+    return data.history || data.publications || [];
   }
 
   get publications(): Publication[] {
-    return this.data?.publications || [];
+    return this.data?.history || this.data?.publications || [];
   }
 
   // Annual financial statements
-  get annualFinancialStatements(): Array<{ year: number; [key: string]: any }> {
+  get annualFinancialStatements(): AnnualFinancialStatement[] {
     return this.data?.annual_financial_statements || [];
   }
 
-  get annualFinancialStatementsHtml(): Array<{ year: number; [key: string]: any }> {
-    return this.data?.annual_financial_statements_html || [];
+  get annualFinancialStatementsHtml(): AnnualFinancialStatement[] {
+    return (
+      this.data?.annual_financial_statements__html ||
+      this.data?.annual_financial_statements_html ||
+      []
+    );
   }
 
   getAnnualFinancialStatementForYear(
     year: number,
     html: boolean = false,
-  ): { year: number; [key: string]: any } | undefined {
+  ): AnnualFinancialStatement | undefined {
     const list = html
-      ? this.data?.annual_financial_statements_html
+      ? this.data?.annual_financial_statements__html ||
+        this.data?.annual_financial_statements_html
       : this.data?.annual_financial_statements;
     return list?.find((s) => s.year === year);
   }
@@ -374,6 +419,10 @@ export class Company {
     return this.data?.shareholdings;
   }
 
+  get mergersAndAcquisitions(): MergersAndAcquisitionsInfo | undefined {
+    return this.data?.mergers_and_acquisitions;
+  }
+
   // News, insolvency, website content
   get news(): NewsItem[] {
     return this.data?.news || [];
@@ -383,7 +432,7 @@ export class Company {
     return this.data?.insolvency_publications || [];
   }
 
-  get websiteContent(): WebsiteContent | WebsiteContent[] | undefined {
+  get websiteContent(): WebsiteContent | undefined {
     return this.data?.website_content;
   }
 
@@ -392,7 +441,7 @@ export class Company {
     return this.data?.meta?.request_credit_cost;
   }
 
-  get creditsRemaining(): number | undefined {
+  get creditsRemaining(): number | string | undefined {
     return this.data?.meta?.credits_remaining;
   }
 

@@ -1,9 +1,14 @@
+export interface RetryableError {
+  statusCode?: number;
+  [key: string]: unknown;
+}
+
 export interface RetryOptions {
   maxAttempts?: number;
   initialDelay?: number;
   maxDelay?: number;
   backoffFactor?: number;
-  shouldRetry?: (error: any, attempt: number) => boolean;
+  shouldRetry?: (error: RetryableError, attempt: number) => boolean;
 }
 
 const defaultOptions: Required<RetryOptions> = {
@@ -11,19 +16,27 @@ const defaultOptions: Required<RetryOptions> = {
   initialDelay: 1000,
   maxDelay: 10000,
   backoffFactor: 2,
-  shouldRetry: (error: any) => {
+  shouldRetry: (error: RetryableError) => {
     // Retry on network errors or 5xx status codes
-    if (!error.statusCode) return true;
+    if (error.statusCode === undefined) return true;
     return error.statusCode >= 500;
-  }
+  },
 };
+
+function normalizeThrownValue(value: unknown): Error {
+  if (value instanceof Error) return value;
+
+  const error = new Error('Retry failed with a non-Error value');
+  (error as Error & { cause?: unknown }).cause = value;
+  return error;
+}
 
 export async function retry<T>(
   fn: () => Promise<T>,
-  options?: RetryOptions
+  options?: RetryOptions,
 ): Promise<T> {
   const opts = { ...defaultOptions, ...options };
-  let lastError: any;
+  let lastError: unknown;
   
   for (let attempt = 1; attempt <= opts.maxAttempts; attempt++) {
     try {
@@ -31,8 +44,15 @@ export async function retry<T>(
     } catch (error) {
       lastError = error;
       
-      if (attempt === opts.maxAttempts || !opts.shouldRetry(error, attempt)) {
-        throw error;
+      const retryableError =
+        error && typeof error === 'object'
+          ? (error as RetryableError)
+          : { cause: error };
+      if (
+        attempt === opts.maxAttempts ||
+        !opts.shouldRetry(retryableError, attempt)
+      ) {
+        throw normalizeThrownValue(error);
       }
       
       const delay = Math.min(
@@ -44,9 +64,12 @@ export async function retry<T>(
     }
   }
   
-  throw lastError;
+  if (lastError === undefined) {
+    throw new Error('Retry failed without an error');
+  }
+  throw normalizeThrownValue(lastError);
 }
 
 export function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

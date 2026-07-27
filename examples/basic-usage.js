@@ -17,17 +17,30 @@ async function main() {
     console.log('=== Search with Features ===');
     const detailedData = await client.fetchOrganization({
       q: 'OroraTech GmbH München',
-      features: ['related_persons', 'financial_kpi', 'publications']
+      features: [
+        'related_persons',
+        'financial_kpi',
+        'publications',
+        'mergers_and_acquisitions',
+      ],
     });
 
     console.log('Company:', detailedData.name);
-    console.log('Registration:', detailedData.register_number);
+    console.log('Registration:', detailedData.registration?.register_number);
+    console.log(
+      'Representation:',
+      detailedData.representation_scheme?.current?.join(' '),
+    );
     
     // Display management
     if (detailedData.related_persons?.current) {
       console.log('\nCurrent Management:');
       detailedData.related_persons.current.forEach(person => {
-        console.log(`  - ${person.name} (${person.role})`);
+        const role =
+          typeof person.role === 'string'
+            ? person.role
+            : person.role.de?.long || person.role.en?.long || person.label;
+        console.log(`  - ${person.name} (${role})`);
       });
     }
 

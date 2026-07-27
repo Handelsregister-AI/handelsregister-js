@@ -3,6 +3,7 @@ import { retry, sleep } from '../src/utils/retry';
 import { readFile, writeFile, detectFileType } from '../src/utils/fileHandler';
 import * as fs from 'fs';
 import * as path from 'path';
+import { vi } from 'vitest';
 
 describe('Cache', () => {
   let cache: Cache<any>;
@@ -83,7 +84,7 @@ describe('generateCacheKey', () => {
 describe('retry', () => {
   it('should retry on failure', async () => {
     let attempts = 0;
-    const fn = jest.fn(async () => {
+    const fn = vi.fn(async () => {
       attempts++;
       if (attempts < 3) {
         throw new Error('Fail');
@@ -97,7 +98,7 @@ describe('retry', () => {
   });
 
   it('should throw after max attempts', async () => {
-    const fn = jest.fn(async () => {
+    const fn = vi.fn(async () => {
       throw new Error('Always fails');
     });
 
@@ -108,7 +109,7 @@ describe('retry', () => {
   });
 
   it('should not retry if shouldRetry returns false', async () => {
-    const fn = jest.fn(async () => {
+    const fn = vi.fn(async () => {
       const error: any = new Error('Special error');
       error.statusCode = 400;
       throw error;
@@ -125,7 +126,7 @@ describe('retry', () => {
 
   it('should use exponential backoff', async () => {
     let attempts = 0;
-    const fn = jest.fn(async () => {
+    const fn = vi.fn(async () => {
       attempts++;
       if (attempts < 3) {
         throw new Error('Fail');
@@ -218,6 +219,22 @@ describe('fileHandler', () => {
       
       expect(result.data).toEqual(testData);
       expect(result.headers).toEqual(['name', 'city']);
+    });
+  });
+
+  describe('XLSX file operations', () => {
+    const xlsxFile = path.join(testDir, 'test.xlsx');
+    const testData = [
+      { name: 'Company A', employees: 10 },
+      { name: 'Company B', employees: 25 },
+    ];
+
+    it('should write and read XLSX files with the maintained SheetJS package', async () => {
+      await writeFile(xlsxFile, testData, 'xlsx', ['name', 'employees']);
+      const result = await readFile(xlsxFile, 'xlsx');
+
+      expect(result.data).toEqual(testData);
+      expect(result.headers).toEqual(['name', 'employees']);
     });
   });
 

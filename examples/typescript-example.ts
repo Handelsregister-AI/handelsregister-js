@@ -7,7 +7,8 @@ import {
   FinancialKPI,
   RelatedPerson,
   HandelsregisterError,
-  AuthenticationError
+  AuthenticationError,
+  SearchOrganizationFilters,
 } from '../src';
 
 async function demonstrateTypeScript(): Promise<void> {
@@ -23,8 +24,13 @@ async function demonstrateTypeScript(): Promise<void> {
     // Type-safe search parameters
     const searchParams: SearchParams = {
       q: 'Porsche AG Stuttgart',
-      features: ['financial_kpi', 'related_persons', 'balance_sheet_accounts'],
-      aiSearch: 'on'
+      features: [
+        'financial_kpi',
+        'related_persons',
+        'balance_sheet_accounts',
+        'mergers_and_acquisitions',
+      ],
+      aiSearch: 'on-default'
     };
 
     // Fetch with full type inference
@@ -51,13 +57,31 @@ async function demonstrateTypeScript(): Promise<void> {
     // Filter typed person data
     if (companyData.related_persons?.current) {
       const executives: RelatedPerson[] = companyData.related_persons.current
-        .filter(person => person.role.includes('Vorstand'));
+        .filter((person) => {
+          if (typeof person.role === 'string') {
+            return person.role.includes('Vorstand');
+          }
+          const german = person.role.de;
+          if (!german || typeof german !== 'object') return false;
+          const localized = german as Record<string, unknown>;
+          return (
+            typeof localized.long === 'string' &&
+            localized.long.includes('Vorstand')
+          );
+        });
 
       console.log('\nBoard Members:');
       executives.forEach(exec => {
         console.log(`- ${exec.name}`);
       });
     }
+
+    const filters: SearchOrganizationFilters = {
+      legal_form_code: ['GmbH', 'AG'],
+      state: 'Bayern',
+      pl_revenue: { gte: 1_000_000 },
+    };
+    await client.searchOrganizations({ filters, limit: 10 });
 
     // Using Company class with type safety
     await demonstrateCompanyClass();

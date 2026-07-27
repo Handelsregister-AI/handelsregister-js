@@ -140,4 +140,85 @@ describe('Person Class', () => {
       expect(person.name).toBe('Erika Mustermann (updated)');
     });
   });
+
+  describe('current API contact, role, and shareholding shapes', () => {
+    it('normalizes structured contacts and detects current roles by end_date', async () => {
+      const currentData: PersonData = {
+        entity_id: 'p-current',
+        name: 'Erika Mustermann',
+        contact: {
+          emails: [
+            {
+              address: 'info@musterfirma.example',
+              type: 'organization',
+              label: 'Company email',
+            },
+          ],
+          phones: [
+            {
+              number: '+49 89 123',
+              type: 'organization',
+            },
+          ],
+        },
+        handelsregister_roles: [
+          {
+            entity_id: 'org-1',
+            name: 'Musterfirma GmbH',
+            label: 'MANAGING_DIRECTOR',
+            role: {
+              en: 'Managing Director',
+              de: 'Geschäftsführer',
+            },
+            start_date: '2020-01-01',
+            end_date: null,
+          },
+          {
+            entity_id: 'org-2',
+            name: 'Old GmbH',
+            label: 'MANAGING_DIRECTOR',
+            end_date: '2019-12-31',
+          },
+        ],
+        shareholdings: {
+          holdings: {
+            current: [
+              {
+                organization: {
+                  entity_id: 'org-1',
+                  name: 'Musterfirma GmbH',
+                },
+                ownership: {
+                  percentage: 25,
+                  contribution: { amount: 12500, currency: 'EUR' },
+                },
+                as_of: '2025-03-15',
+              },
+            ],
+          },
+          summary: { total_current: 1 },
+        },
+      };
+
+      const person = new Person('Erika Mustermann', 'Musterfirma GmbH', API_KEY);
+      nock(BASE_URL)
+        .get('/api/v1/fetch-person')
+        .query(true)
+        .reply(200, currentData);
+      await person.getRawData();
+
+      expect(person.emails).toEqual(['info@musterfirma.example']);
+      expect(person.phones).toEqual(['+49 89 123']);
+      expect(person.emailContacts[0]).toEqual(
+        expect.objectContaining({ type: 'organization' }),
+      );
+      expect(person.currentHandelsregisterRoles).toHaveLength(1);
+      expect(person.currentHandelsregisterRoles[0].name).toBe(
+        'Musterfirma GmbH',
+      );
+      expect(
+        person.shareholdings?.holdings?.current?.[0].ownership?.percentage,
+      ).toBe(25);
+    });
+  });
 });

@@ -4,6 +4,8 @@ import {
   PersonData,
   PersonFeature,
   PersonShareholdings,
+  PersonContactEntry,
+  PersonRegistryRole,
 } from './types';
 
 export interface PersonOptions {
@@ -113,10 +115,30 @@ export class Person {
   }
 
   get emails(): string[] {
-    return this.data?.contact?.emails || [];
+    return (this.data?.contact?.emails || [])
+      .map((entry) =>
+        typeof entry === 'string'
+          ? entry
+          : entry.address || entry.value || '',
+      )
+      .filter(Boolean);
   }
 
   get phones(): string[] {
+    return (this.data?.contact?.phones || [])
+      .map((entry) =>
+        typeof entry === 'string'
+          ? entry
+          : entry.number || entry.value || entry.address || '',
+      )
+      .filter(Boolean);
+  }
+
+  get emailContacts(): Array<string | PersonContactEntry> {
+    return this.data?.contact?.emails || [];
+  }
+
+  get phoneContacts(): Array<string | PersonContactEntry> {
     return this.data?.contact?.phones || [];
   }
 
@@ -128,17 +150,19 @@ export class Person {
     return this.data?.profiles?.github;
   }
 
-  get handelsregisterRoles(): Array<{ [key: string]: any }> {
+  get handelsregisterRoles(): PersonRegistryRole[] {
     return this.data?.handelsregister_roles || [];
   }
 
-  get currentHandelsregisterRoles(): Array<{ [key: string]: any }> {
+  get currentHandelsregisterRoles(): PersonRegistryRole[] {
     return (this.data?.handelsregister_roles || []).filter(
-      (r: any) => r?.is_current === true,
+      (role) =>
+        role.is_current === true ||
+        (role.is_current === undefined && !role.end_date),
     );
   }
 
-  get affiliations(): Array<{ [key: string]: any }> {
+  get affiliations(): NonNullable<PersonData['affiliations']> {
     return this.data?.affiliations || [];
   }
 
@@ -150,7 +174,7 @@ export class Person {
     return this.data?.meta?.request_credit_cost;
   }
 
-  get creditsRemaining(): number | undefined {
+  get creditsRemaining(): number | string | undefined {
     return this.data?.meta?.credits_remaining;
   }
 
@@ -160,10 +184,10 @@ export class Person {
 
   // ----- helpers -----
 
-  getHandelsregisterRolesByLabel(label: string): Array<{ [key: string]: any }> {
+  getHandelsregisterRolesByLabel(label: string): PersonRegistryRole[] {
     const lower = label.toLowerCase();
-    return (this.data?.handelsregister_roles || []).filter((r: any) => {
-      const l = typeof r?.label === 'string' ? r.label : '';
+    return (this.data?.handelsregister_roles || []).filter((role) => {
+      const l = typeof role.label === 'string' ? role.label : '';
       return l.toLowerCase().includes(lower);
     });
   }

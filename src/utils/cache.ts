@@ -62,7 +62,21 @@ export class Cache<T> {
   }
 }
 
-export function generateCacheKey(params: Record<string, any>): string {
+function serializeCacheValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (
+    typeof value === 'number' ||
+    typeof value === 'boolean' ||
+    typeof value === 'bigint'
+  ) {
+    return value.toString();
+  }
+
+  const serialized = JSON.stringify(value);
+  return serialized ?? typeof value;
+}
+
+export function generateCacheKey(params: Record<string, unknown>): string {
   const sortedKeys = Object.keys(params).sort();
   const keyParts: string[] = [];
   
@@ -70,9 +84,11 @@ export function generateCacheKey(params: Record<string, any>): string {
     const value = params[key];
     if (value !== undefined && value !== null) {
       if (Array.isArray(value)) {
-        keyParts.push(`${key}:${value.sort().join(',')}`);
+        keyParts.push(
+          `${key}:${value.map(serializeCacheValue).sort().join(',')}`,
+        );
       } else {
-        keyParts.push(`${key}:${String(value)}`);
+        keyParts.push(`${key}:${serializeCacheValue(value)}`);
       }
     }
   }

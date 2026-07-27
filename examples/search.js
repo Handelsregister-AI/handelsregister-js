@@ -9,9 +9,14 @@ async function main() {
   const client = new Handelsregister(process.env.HANDELSREGISTER_API_KEY);
 
   const result = await client.searchOrganizations({
-    q: 'tech',
+    // q may be omitted when filters are present.
     limit: 5,
-    filters: { postal_code: '80331' },
+    filters: {
+      postal_code: '80331',
+      legal_form_code: ['GmbH', 'UG'],
+      active: true,
+      pl_revenue: { gte: 1_000_000 },
+    },
   });
 
   console.log(`Found ${result.total} matching companies (showing ${result.results.length}):\n`);

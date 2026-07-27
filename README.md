@@ -9,6 +9,8 @@ Official Node.js SDK for accessing German company registry (Handelsregister) dat
 
 ## Installation
 
+Requires Node.js 22.13 or newer.
+
 ```bash
 npm install handelsregister
 ```
@@ -81,10 +83,20 @@ Search and retrieve company information.
 ```javascript
 const data = await client.fetchOrganization({
   q: 'KONUX GmbH München',
-  features: ['related_persons', 'financial_kpi'],
+  features: [
+    'related_persons',
+    'financial_kpi',
+    'mergers_and_acquisitions'
+  ],
   aiSearch: true,            // sends ai_search=on-default; pass false to disable
   realtimeMode: false        // set to true for a live Handelsregister lookup (+10 credits)
 });
+
+console.log(data.representation_scheme?.current);
+console.log(
+  data.related_persons?.current?.[0].role_representation_scheme?.history
+);
+console.log(data.mergers_and_acquisitions?.transactions);
 ```
 
 The `aiSearch` option accepts a `boolean` or the literal string `'on-default' | 'off'`. The `realtimeMode` option accepts a `boolean` or the literal string `'handelsregister-default'`.
@@ -97,11 +109,34 @@ Paginated search with optional filters.
 const result = await client.searchOrganizations({
   q: 'tech',
   skip: 0,
-  limit: 20,                     // 1..100
-  filters: { postal_code: '80331' }
+  limit: 20,                     // 1..30
+  filters: {
+    postal_code: '80331',
+    legal_form_code: ['GmbH', 'UG'],
+    active: true,
+    pl_revenue: { gte: 1_000_000, lte: 5_000_000 }
+  },
+  aiMode: false                  // true sends ai_mode=on-default (5 credits)
 });
 console.log(result.total, result.results.length);
 ```
+
+`q` is optional when at least one filter is supplied:
+
+```javascript
+const result = await client.searchOrganizations({
+  filters: {
+    registration_date_from: '2024-01-01',
+    state: 'Bayern',
+    company_size_category: 'medium',
+    emp_count: { gte: 50, lte: 249 }
+  }
+});
+```
+
+The typed `SearchOrganizationFilters` interface supports every documented
+identity, industry, status, location/radius, register, employee, balance-sheet,
+and profit-and-loss filter.
 
 #### `fetchPerson(params)`
 
@@ -113,13 +148,17 @@ const person = await client.fetchPerson({
   organizationQ: 'Musterfirma GmbH',
   features: ['shareholdings']    // optional, +5 credits when data returned
 });
+
+console.log(person.contact?.emails); // structured address/type/label entries
+console.log(person.shareholdings?.holdings?.current);
 ```
 
 Use the `Person` class for lazy-loading and convenient property access (see below).
 
 #### `fetchDocument(companyId, documentType, outputFile?)`
 
-Download official PDF documents.
+Download official PDF or XML documents. The positional signature remains
+supported, and an object form is also available.
 
 ```javascript
 // Download to buffer
@@ -127,6 +166,20 @@ const buffer = await client.fetchDocument('entity123', 'shareholders_list');
 
 // Download to file
 await client.fetchDocument('entity123', 'AD', './document.pdf');
+
+// SI is returned as XML
+await client.fetchDocument({
+  companyId: 'entity123',
+  documentType: 'SI',
+  outputFile: './structured-information.xml'
+});
+
+// Include response Content-Type and server filename
+const document = await client.fetchDocumentWithMetadata({
+  companyId: 'entity123',
+  documentType: 'SI'
+});
+console.log(document.contentType); // application/xml; charset=utf-8
 ```
 
 Document types:
@@ -134,6 +187,7 @@ Document types:
 - `articles_of_association` - Articles / bylaws (Gesellschaftsvertrag / Satzung)
 - `AD` - Current company data (Aktuelle Daten)
 - `CD` - Historical data (Chronologische Daten)
+- `SI` - Structured information (XML)
 
 ### Token Management
 
@@ -198,11 +252,20 @@ company.city;
 company.currentRelatedPersons;  // Current management
 company.pastRelatedPersons;     // Former management
 company.getRelatedPersonsByRole('Geschäftsführer');
+company.representationScheme;          // organization-level rules + history
+company.currentRelatedPersons[0]
+  ?.role_representation_scheme;       // role-specific rules + history
 
 // Financial data
 company.financialKPIs;          // All financial KPIs
 company.latestFinancialKPI;     // Most recent KPI
 company.getFinancialKPIByYear(2023);
+
+// Ownership and transactions
+company.shareholders;
+company.ubos;
+company.shareholdings;
+company.mergersAndAcquisitions;
 
 // Documents
 await company.fetchDocument('shareholders_list', 'output.pdf');
@@ -221,6 +284,14 @@ handelsregister fetch "KONUX GmbH München" --feature financial_kpi
 
 # Download documents
 handelsregister document "KONUX GmbH" --type shareholders_list --output konux.pdf
+
+# Filter-only search using any documented filters
+handelsregister search \
+  --filters '{"legal_form_code":"GmbH","pl_revenue":{"gte":1000000}}' \
+  --limit 30
+
+# Structured XML document
+handelsregister document "KONUX GmbH" --type SI --output konux.xml
 
 # Enrich data file
 handelsregister enrich companies.csv \
@@ -263,10 +334,37 @@ Ownership:
 - `shareholders` - Shareholder list with capital contributions
 - `ubos` - Ultimate beneficial owners
 - `shareholdings` - Outbound shareholdings the company holds in others
+- `mergers_and_acquisitions` - Mergers, divisions, enterprise agreements,
+  counterparties, succession and control relationships
 
 Enrichment:
 - `news` - News articles about the company
-- `website_content` - Structured company website content (requires `aiSearch: true`)
+- `website_content` - Company website as LLM-ready Markdown (requires `aiSearch: true`)
+
+### Current response structure
+
+Core organization responses include `contact_data` and
+`representation_scheme`. Coordinates use `latitude` and `longitude`.
+Organization and person representation schemes expose `current` (or `latest`
+for some past person roles) and dated `history` entries.
+
+Feature response keys mostly match their requested names, with two important
+details:
+
+- `publications` is returned under `history`.
+- `annual_financial_statements__html` keeps the double underscore in the
+  response key.
+
+The SDK types retain older flattened aliases as deprecated optional fields, but
+new code should use the current nested structures:
+
+```javascript
+data.contact_data?.website;
+data.shareholdings?.holdings?.current;
+data.ubos?.beneficial_owners;
+data.mergers_and_acquisitions?.control?.controlled_by;
+data.history; // requested via features: ['publications']
+```
 
 ## Error Handling
 
@@ -276,6 +374,10 @@ The SDK provides specific error classes:
 const { 
   HandelsregisterError,
   AuthenticationError,
+  PaymentRequiredError,
+  ForbiddenError,
+  NotFoundError,
+  RequestTimeoutError,
   RateLimitError,
   ValidationError 
 } = require('handelsregister');
@@ -287,9 +389,17 @@ try {
     console.error('Invalid API key');
   } else if (error instanceof RateLimitError) {
     console.error('Rate limit exceeded');
+  } else if (error instanceof ForbiddenError &&
+             error.errorCode === 'subscription_required') {
+    console.error('fetch-person requires Plus, Pro, or Max');
   }
 }
 ```
+
+Errors preserve the parsed API response on `error.response`, the HTTP status on
+`error.statusCode`, and machine-readable API codes such as
+`subscription_required` on `error.errorCode`. HTTP 408 responses are not
+automatically retried, avoiding duplicate paid AI work.
 
 ## TypeScript Support
 

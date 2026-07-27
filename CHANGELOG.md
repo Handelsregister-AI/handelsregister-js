@@ -5,6 +5,37 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-27
+
+### Added
+- Full response types for organization and related-person representation
+  schemes, including current/latest values and dated history.
+- `mergers_and_acquisitions` organization feature with transaction,
+  counterparty, succession, control, and summary types.
+- Complete typed organization-search filter surface and filter-only searches.
+- `aiMode` support for `searchOrganizations`.
+- `SI` document support and `fetchDocumentWithMetadata` for content type and
+  server filename access.
+- Current nested response types for contacts, financial accounts,
+  shareholders, UBOs, organization/person shareholdings, publications, and
+  annual statements.
+- Specific `PaymentRequiredError`, `ForbiddenError`, `NotFoundError`, and
+  `RequestTimeoutError` classes.
+
+### Changed
+- Organization search now enforces the documented maximum of 30 results.
+- `Company` resolves current `contact_data`, `history`, coordinate, and
+  double-underscore HTML statement fields while retaining legacy fallbacks.
+- `Person` normalizes structured email/phone entries and detects current
+  Handelsregister roles using `end_date`.
+- HTTP error messages and machine-readable error codes are preserved from API
+  responses. HTTP 408 is not automatically retried.
+- Updated Axios and SheetJS to maintained, vulnerability-free releases.
+- Replaced Jest with Vitest and migrated to ESLint's current flat
+  configuration to remove vulnerable development dependency chains.
+- Raised the minimum supported Node.js version to 22.13 to match supported
+  dependencies.
+
 ## [0.2.0] - 2026-04-28
 
 ### Added

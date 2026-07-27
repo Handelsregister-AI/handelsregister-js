@@ -2,12 +2,12 @@
 
 import { Command } from 'commander';
 import * as chalk from 'chalk';
-import * as Table from 'cli-table3';
+import Table from 'cli-table3';
 import * as dotenv from 'dotenv';
-import { Handelsregister, Company, Person } from '../src';
-import { Feature, DocumentType, PersonFeature } from '../src/types';
-import { detectFileType } from '../src/utils/fileHandler';
-import { version } from '../src/version';
+import { Handelsregister, Company, Person } from '../dist';
+import { Feature, DocumentType, PersonFeature } from '../dist/types';
+import { detectFileType } from '../dist/utils/fileHandler';
+import { version } from '../dist/version';
 
 // Load environment variables
 dotenv.config();
@@ -74,16 +74,28 @@ program
 // ----- search -----
 
 program
-  .command('search <query>')
+  .command('search [query]')
   .description('Search organizations with optional filters and pagination')
+  .option(
+    '--filters <json>',
+    'JSON object containing any documented organization search filters',
+  )
   .option('--postal-code <code>', 'Filter by postal code')
-  .option('--limit <n>', 'Results per page (1..100)', '10')
+  .option('--limit <n>', 'Results per page (1..30)', '10')
   .option('--skip <n>', 'Pagination offset', '0')
+  .option('--ai-mode', 'Enable AI-assisted search (5 credits)')
   .option('--json', 'Output as JSON')
-  .action(async (query: string, options: any) => {
+  .action(async (query: string | undefined, options: any) => {
     try {
       const client = buildClient();
-      const filters: Record<string, any> = {};
+      let filters: Record<string, unknown> = {};
+      if (options.filters) {
+        const parsed = JSON.parse(options.filters);
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('--filters must be a JSON object');
+        }
+        filters = parsed;
+      }
       if (options.postalCode) filters.postal_code = options.postalCode;
 
       const result = await client.searchOrganizations({
@@ -91,6 +103,7 @@ program
         skip: parseInt(options.skip, 10),
         limit: parseInt(options.limit, 10),
         filters: Object.keys(filters).length > 0 ? filters : undefined,
+        aiMode: options.aiMode ? true : undefined,
       });
 
       if (options.json) {
@@ -166,8 +179,10 @@ program
         person.handelsregisterRoles.forEach((r: any) => {
           rolesTable.push([
             r.label || '-',
-            r.organization || '-',
-            r.is_current ? 'Yes' : 'No',
+            r.name || r.organization || '-',
+            r.is_current === true || (r.is_current === undefined && !r.end_date)
+              ? 'Yes'
+              : 'No',
           ]);
         });
         console.log(rolesTable.toString());
@@ -189,7 +204,7 @@ program
   .description('Download company documents')
   .requiredOption(
     '-t, --type <type>',
-    'Document type (shareholders_list, articles_of_association, AD, CD)',
+    'Document type (shareholders_list, articles_of_association, AD, CD, SI)',
   )
   .option('-o, --output <file>', 'Output file path')
   .action(async (query: string, options: any) => {
@@ -198,7 +213,9 @@ program
       const company = new Company(query, client);
       const entityId = await company.getId();
 
-      const outputFile = options.output || `${entityId}_${options.type}.pdf`;
+      const extension = options.type === 'SI' ? 'xml' : 'pdf';
+      const outputFile =
+        options.output || `${entityId}_${options.type}.${extension}`;
 
       console.log(chalk.blue(`Fetching document for: ${await company.getName()}`));
       console.log(chalk.gray(`Document type: ${options.type}`));

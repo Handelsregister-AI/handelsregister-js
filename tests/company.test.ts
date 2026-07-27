@@ -375,6 +375,127 @@ describe('Company Class', () => {
     });
   });
 
+  describe('current API v1 response shapes', () => {
+    let company: Company;
+
+    const currentApiData: CompanyData = {
+      entity_id: 'current-1',
+      name: 'Current Shape AG',
+      address: {
+        street: 'Teststraße',
+        house_number: '42',
+        postal_code: '80331',
+        city: 'München',
+        country: 'DEU',
+        coordinates: { latitude: 48.13, longitude: 11.58 },
+      },
+      contact_data: {
+        website: 'https://current.example',
+        phone_number: '+49 89 123',
+        email: 'info@current.example',
+      },
+      representation_scheme: {
+        current: ['Two board members represent jointly.'],
+        history: [
+          {
+            value: ['One board member represented individually.'],
+            effective_from: '2020-01-01',
+            effective_to: '2024-01-01',
+          },
+        ],
+      },
+      related_persons: {
+        current: [
+          {
+            name: 'Erika Vorstand',
+            role: {
+              de: { long: 'Vorsitzende des Vorstands', short: 'Vorstand' },
+              en: { long: 'Board Chair', short: 'Board' },
+            },
+            organization_representation_scheme: {
+              current: ['Two board members represent jointly.'],
+              history: [],
+            },
+            role_representation_scheme: {
+              current: ['einzelvertretungsberechtigt'],
+              history: [],
+            },
+          },
+        ],
+      },
+      history: [
+        {
+          entity_type: 'EVENT',
+          name: { en: 'Legal form change', de: 'Rechtsformwechsel' },
+          start_date: '2024-01-01',
+        },
+      ],
+      annual_financial_statements__html: [
+        { year: 2024, document_html: '<p>Report</p>' },
+      ],
+      website_content: '# Current Shape AG\n\nCompany website content.',
+      mergers_and_acquisitions: {
+        transactions: [
+          {
+            id: 'tx-1',
+            type: {
+              category: 'MERGER',
+              event_type: 'GROUP.MERGER',
+              name: { en: 'Merger', de: 'Verschmelzung' },
+            },
+          },
+        ],
+        control: { controlled_by: [], controls: [], former: [] },
+        summary: { total_transactions: 1 },
+      },
+    };
+
+    beforeEach(async () => {
+      company = new Company('Current Shape AG', API_KEY);
+      nock(BASE_URL)
+        .get('/api/v1/fetch-organization')
+        .query(true)
+        .reply(200, currentApiData);
+      await company.getRawData();
+    });
+
+    it('uses nested contact data and current coordinate names', () => {
+      expect(company.address).toBe('Teststraße 42, 80331, München, DEU');
+      expect(company.countryCode).toBe('DEU');
+      expect(company.coordinates).toEqual({
+        latitude: 48.13,
+        longitude: 11.58,
+      });
+      expect(company.website).toBe('https://current.example');
+      expect(company.phoneNumber).toBe('+49 89 123');
+      expect(company.email).toBe('info@current.example');
+    });
+
+    it('exposes organization and person representation schemes', () => {
+      expect(company.representationScheme?.current).toHaveLength(1);
+      expect(
+        company.currentRelatedPersons[0].role_representation_scheme?.current,
+      ).toEqual(['einzelvertretungsberechtigt']);
+      expect(company.getRelatedPersonsByRole('Board Chair')).toHaveLength(1);
+      expect(company.getRelatedPersonsByRole('Vorsitzende')).toHaveLength(1);
+    });
+
+    it('maps publications to the history response key', () => {
+      expect(company.publications).toHaveLength(1);
+      expect(company.publications[0].entity_type).toBe('EVENT');
+    });
+
+    it('exposes the double-underscore HTML and M&A response keys', () => {
+      expect(company.annualFinancialStatementsHtml[0].document_html).toBe(
+        '<p>Report</p>',
+      );
+      expect(
+        company.mergersAndAcquisitions?.summary?.total_transactions,
+      ).toBe(1);
+      expect(company.websiteContent).toContain('# Current Shape AG');
+    });
+  });
+
   describe('utility methods', () => {
     let company: Company;
 
