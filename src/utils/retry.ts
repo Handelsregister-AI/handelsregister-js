@@ -9,9 +9,14 @@ export interface RetryOptions {
   maxDelay?: number;
   backoffFactor?: number;
   shouldRetry?: (error: RetryableError, attempt: number) => boolean;
+  getDelay?: (
+    error: RetryableError,
+    attempt: number,
+    defaultDelay: number,
+  ) => number;
 }
 
-const defaultOptions: Required<RetryOptions> = {
+const defaultOptions = {
   maxAttempts: 3,
   initialDelay: 1000,
   maxDelay: 10000,
@@ -21,6 +26,11 @@ const defaultOptions: Required<RetryOptions> = {
     if (error.statusCode === undefined) return true;
     return error.statusCode >= 500;
   },
+  getDelay: (
+    _error: RetryableError,
+    _attempt: number,
+    defaultDelay: number,
+  ) => defaultDelay,
 };
 
 function normalizeThrownValue(value: unknown): Error {
@@ -55,9 +65,13 @@ export async function retry<T>(
         throw normalizeThrownValue(error);
       }
       
-      const delay = Math.min(
+      const defaultDelay = Math.min(
         opts.initialDelay * Math.pow(opts.backoffFactor, attempt - 1),
         opts.maxDelay
+      );
+      const delay = Math.max(
+        0,
+        opts.getDelay(retryableError, attempt, defaultDelay),
       );
       
       await sleep(delay);

@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-07
+
+### Added
+
+- Complete Account API support: profile, credits, usage, cursor-paginated
+  transactions, subscription, masked API-key listing, and Bearer-only API-key
+  creation/revocation.
+- Complete Signals API support: catalog, filtered list/detail requests,
+  multi-organization filtering, opaque cursor handling, lazy async iteration,
+  and all seven public `SignalTopic` values.
+- Complete Monitoring API support for pricing, monitor lifecycle, webhook
+  endpoint lifecycle, delivery retry/history, and event history.
+- Durable idempotency keys on every Monitoring mutation, explicit-key support,
+  replay status capture, and safe retry rules for database and receiver-side
+  operations.
+- Receiver helpers for webhook HMAC verification, secret rotation, timestamp
+  tolerance, event construction, and endpoint-verification challenges.
+- Current API error classes for subscription requirements, conflicts,
+  idempotency failures, server failures, and the temporary execution kill
+  switch while preserving compatibility with existing error classes.
+- `iterateSearchOrganizations()` for lazy offset pagination with exact final
+  page sizing.
+- Generic `extraHeaders` and `HANDELSREGISTER_EXTRA_HEADERS` support for
+  gateways and proxies without allowing authentication headers to be
+  overridden.
+- Monitoring and webhook-management CLI command groups.
+
+### Changed
+
+- The project is now licensed under GNU Affero General Public License v3.0
+  (`AGPL-3.0-only`).
+- Search financial filters now use the current nested `financial_filters`
+  wire shape and `company_size_category` maps to `emp_size_category`.
+- Real-time organization requests are no longer cached and reject features
+  that the real-time service cannot combine.
+- JSON endpoints send `Accept: application/json`, redirects surface as API
+  errors, and API errors retain response headers, payload, detail, and meta.
+- Monitoring pricing policy versions remain informational and cannot be
+  supplied through monitor mutation methods.
+
 ## [0.3.0] - 2026-07-27
 
 ### Added

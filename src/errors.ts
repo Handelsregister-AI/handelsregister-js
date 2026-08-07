@@ -1,20 +1,43 @@
+export type ResponseHeaders = Record<string, string>;
+
 export class HandelsregisterError extends Error {
   public readonly statusCode?: number;
+  /** Parsed response payload. Kept for backward compatibility. */
   public readonly response?: unknown;
+  /** Alias matching the Python SDK's error context. */
+  public readonly payload?: unknown;
   public readonly errorCode?: string;
+  public readonly responseHeaders: ResponseHeaders;
 
   constructor(
     message: string,
     statusCode?: number,
     response?: unknown,
     errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
   ) {
     super(message);
     this.name = 'HandelsregisterError';
     this.statusCode = statusCode;
     this.response = response;
+    this.payload = response;
     this.errorCode = errorCode;
-    Object.setPrototypeOf(this, HandelsregisterError.prototype);
+    this.responseHeaders = responseHeaders;
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+
+  get meta(): Record<string, unknown> {
+    if (!this.payload || typeof this.payload !== 'object') return {};
+    const meta = (this.payload as Record<string, unknown>).meta;
+    return meta && typeof meta === 'object' && !Array.isArray(meta)
+      ? (meta as Record<string, unknown>)
+      : {};
+  }
+
+  get detail(): unknown {
+    return this.payload && typeof this.payload === 'object'
+      ? (this.payload as Record<string, unknown>).detail
+      : undefined;
   }
 }
 
@@ -22,23 +45,66 @@ export class InvalidResponseError extends HandelsregisterError {
   constructor(message: string, response?: unknown) {
     super(message, undefined, response);
     this.name = 'InvalidResponseError';
-    Object.setPrototypeOf(this, InvalidResponseError.prototype);
   }
 }
 
 export class AuthenticationError extends HandelsregisterError {
-  constructor(message: string = 'Invalid or missing API key', response?: unknown) {
-    super(message, 401, response);
+  constructor(
+    message: string = 'Invalid or missing API key',
+    response?: unknown,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, 401, response, undefined, responseHeaders);
     this.name = 'AuthenticationError';
-    Object.setPrototypeOf(this, AuthenticationError.prototype);
+  }
+}
+
+export class ValidationError extends HandelsregisterError {
+  constructor(
+    message: string,
+    response?: unknown,
+    statusCode: 400 | 422 = 400,
+    errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, statusCode, response, errorCode, responseHeaders);
+    this.name = 'ValidationError';
+  }
+}
+
+export class RequestValidationError extends ValidationError {
+  constructor(
+    message: string,
+    response?: unknown,
+    statusCode: 400 | 422 = 422,
+    errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, response, statusCode, errorCode, responseHeaders);
+    this.name = 'RequestValidationError';
   }
 }
 
 export class PaymentRequiredError extends HandelsregisterError {
-  constructor(message: string = 'Insufficient credits', response?: unknown) {
-    super(message, 402, response);
+  constructor(
+    message: string = 'Insufficient credits',
+    response?: unknown,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, 402, response, undefined, responseHeaders);
     this.name = 'PaymentRequiredError';
-    Object.setPrototypeOf(this, PaymentRequiredError.prototype);
+  }
+}
+
+/** Preferred name matching the API contract; PaymentRequiredError remains supported. */
+export class InsufficientCreditsError extends PaymentRequiredError {
+  constructor(
+    message: string = 'Insufficient credits',
+    response?: unknown,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, response, responseHeaders);
+    this.name = 'InsufficientCreditsError';
   }
 }
 
@@ -47,26 +113,80 @@ export class ForbiddenError extends HandelsregisterError {
     message: string = 'The requested operation is forbidden',
     response?: unknown,
     errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
   ) {
-    super(message, 403, response, errorCode);
+    super(message, 403, response, errorCode, responseHeaders);
     this.name = 'ForbiddenError';
-    Object.setPrototypeOf(this, ForbiddenError.prototype);
+  }
+}
+
+export class SubscriptionRequiredError extends ForbiddenError {
+  constructor(
+    message: string = 'The requested operation requires another plan',
+    response?: unknown,
+    errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, response, errorCode, responseHeaders);
+    this.name = 'SubscriptionRequiredError';
   }
 }
 
 export class NotFoundError extends HandelsregisterError {
-  constructor(message: string = 'Resource not found', response?: unknown) {
-    super(message, 404, response);
+  constructor(
+    message: string = 'Resource not found',
+    response?: unknown,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, 404, response, undefined, responseHeaders);
     this.name = 'NotFoundError';
-    Object.setPrototypeOf(this, NotFoundError.prototype);
   }
 }
 
 export class RequestTimeoutError extends HandelsregisterError {
-  constructor(message: string = 'API request timed out', response?: unknown) {
-    super(message, 408, response);
+  constructor(
+    message: string = 'API request timed out',
+    response?: unknown,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, 408, response, undefined, responseHeaders);
     this.name = 'RequestTimeoutError';
-    Object.setPrototypeOf(this, RequestTimeoutError.prototype);
+  }
+}
+
+export class ConflictError extends HandelsregisterError {
+  constructor(
+    message: string = 'The request conflicts with existing state',
+    response?: unknown,
+    errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, 409, response, errorCode, responseHeaders);
+    this.name = 'ConflictError';
+  }
+}
+
+export class IdempotencyConflictError extends ConflictError {
+  constructor(
+    message: string = 'The idempotency key conflicts with another operation',
+    response?: unknown,
+    errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, response, errorCode, responseHeaders);
+    this.name = 'IdempotencyConflictError';
+  }
+}
+
+export class IdempotencyKeyRequiredError extends HandelsregisterError {
+  constructor(
+    message: string = 'An Idempotency-Key header is required',
+    response?: unknown,
+    errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, 428, response, errorCode, responseHeaders);
+    this.name = 'IdempotencyKeyRequiredError';
   }
 }
 
@@ -77,11 +197,36 @@ export class RateLimitError extends HandelsregisterError {
     message: string = 'Rate limit exceeded',
     retryAfter?: number,
     response?: unknown,
+    responseHeaders: ResponseHeaders = {},
   ) {
-    super(message, 429, response);
+    super(message, 429, response, undefined, responseHeaders);
     this.name = 'RateLimitError';
     this.retryAfter = retryAfter;
-    Object.setPrototypeOf(this, RateLimitError.prototype);
+  }
+}
+
+export class ServerError extends HandelsregisterError {
+  constructor(
+    message: string = 'The API returned a server error',
+    statusCode: number = 500,
+    response?: unknown,
+    errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, statusCode, response, errorCode, responseHeaders);
+    this.name = 'ServerError';
+  }
+}
+
+export class ServiceUnavailableError extends ServerError {
+  constructor(
+    message: string = 'The service is temporarily unavailable',
+    response?: unknown,
+    errorCode?: string,
+    responseHeaders: ResponseHeaders = {},
+  ) {
+    super(message, 503, response, errorCode, responseHeaders);
+    this.name = 'ServiceUnavailableError';
   }
 }
 
@@ -89,17 +234,13 @@ export class NetworkError extends HandelsregisterError {
   constructor(message: string, originalError?: Error) {
     super(message);
     this.name = 'NetworkError';
-    if (originalError) {
-      this.stack = originalError.stack;
-    }
-    Object.setPrototypeOf(this, NetworkError.prototype);
+    if (originalError) this.stack = originalError.stack;
   }
 }
 
-export class ValidationError extends HandelsregisterError {
-  constructor(message: string, response?: unknown) {
-    super(message, 400, response);
-    this.name = 'ValidationError';
-    Object.setPrototypeOf(this, ValidationError.prototype);
+export class WebhookSignatureError extends HandelsregisterError {
+  constructor(message: string) {
+    super(message);
+    this.name = 'WebhookSignatureError';
   }
 }

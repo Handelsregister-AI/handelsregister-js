@@ -1,6 +1,6 @@
 {
   "name": "handelsregister",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Node.js SDK for accessing German company registry (Handelsregister) data via handelsregister.ai API",
   "main": "dist/index.js",
   "module": "dist/esm/index.js",
@@ -32,7 +32,7 @@
     "typescript"
   ],
   "author": "handelsregister.ai",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "dependencies": {
     "axios": "^1.18.1",
     "chalk": "^4.1.2",

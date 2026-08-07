@@ -1,3 +1,11 @@
+import type {
+  MonitorStatus,
+  SignalTopic,
+  WebhookDeliveryStatus,
+  WebhookEndpointStatus,
+  WebhookEventType,
+} from './constants';
+
 export interface HandelsregisterConfig {
   apiKey?: string;
   bearerToken?: string;
@@ -5,6 +13,8 @@ export interface HandelsregisterConfig {
   timeout?: number;
   cacheEnabled?: boolean;
   rateLimit?: number;
+  /** Additional headers for gateways or proxies. Authentication headers are reserved. */
+  extraHeaders?: Record<string, string>;
 }
 
 export type AiSearchMode = 'on-default' | 'off';
@@ -693,6 +703,14 @@ export interface SearchOrganizationsResponse {
   [key: string]: unknown;
 }
 
+export interface IterateSearchOrganizationsParams
+  extends Omit<SearchOrganizationsParams, 'limit'> {
+  /** Results requested per API call; defaults to and cannot exceed 30. */
+  pageSize?: number;
+  /** Maximum results to yield. Omit to consume every available page. */
+  maxResults?: number;
+}
+
 export type PersonFeature = 'shareholdings';
 
 export interface FetchPersonParams {
@@ -797,6 +815,218 @@ export interface ListTokensResponse {
 export interface TokenRevocationResponse {
   message?: string;
   [key: string]: unknown;
+}
+
+export type DateInput = string | Date;
+
+export interface CursorPagination {
+  mode?: string;
+  limit?: number;
+  returned?: number;
+  has_more?: boolean;
+  next_cursor?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AccountResponse {
+  meta?: ApiMeta;
+  [key: string]: unknown;
+}
+
+export interface AccountCreditsResponse extends AccountResponse {
+  balance?: Record<string, unknown>;
+  bookings?: Array<Record<string, unknown>>;
+}
+
+export interface AccountUsageParams {
+  fromDate?: DateInput;
+  toDate?: DateInput;
+  groupBy?: 'day' | 'month';
+}
+
+export interface AccountUsageResponse extends AccountResponse {
+  period?: { from?: string; to?: string; [key: string]: unknown };
+  totals?: { requests?: number; credits_used?: number; [key: string]: unknown };
+  by_endpoint?: Array<{
+    endpoint?: string;
+    requests?: number;
+    credits_used?: number;
+    [key: string]: unknown;
+  }>;
+  series?: {
+    group_by?: string;
+    buckets?: Array<Record<string, unknown>>;
+    [key: string]: unknown;
+  };
+}
+
+export interface AccountUsageTransactionsParams {
+  fromDate?: DateInput;
+  toDate?: DateInput;
+  endpoint?: string;
+  perPage?: number;
+  cursor?: string;
+}
+
+export interface AccountUsageTransaction extends Record<string, unknown> {
+  endpoint?: string;
+  credits?: number;
+}
+
+export interface AccountUsageTransactionsResponse extends AccountResponse {
+  transactions: AccountUsageTransaction[];
+  pagination: CursorPagination;
+}
+
+export interface ApiKeyInfo extends Record<string, unknown> {
+  id: string | number;
+  key?: string;
+  masked_key?: string;
+  created_at?: string;
+  last_used_at?: string | null;
+}
+
+export interface ListApiKeysResponse extends AccountResponse {
+  api_keys?: ApiKeyInfo[];
+}
+
+export interface CreateApiKeyResponse extends AccountResponse {
+  api_key?: ApiKeyInfo;
+}
+
+export interface ListSignalsParams {
+  cursor?: string;
+  topics?: string | ReadonlyArray<SignalTopic>;
+  organizationIds?: string | ReadonlyArray<string>;
+  fromDate?: DateInput;
+  toDate?: DateInput;
+}
+
+export interface IterateSignalsParams extends Omit<ListSignalsParams, 'cursor'> {
+  maxResults?: number;
+}
+
+export interface SignalEvent extends Record<string, unknown> {
+  id: string;
+  topic: SignalTopic;
+  topic_name?: LocalizedText;
+  occurred_on?: string;
+  announced_on?: string;
+  date_basis?: string;
+}
+
+export interface SignalRecord extends Record<string, unknown> {
+  event: SignalEvent;
+  organization?: Record<string, unknown>;
+  parties?: Record<string, unknown>;
+  register_entry?: Record<string, unknown>;
+  source?: Record<string, unknown>;
+  details?: Record<string, unknown>;
+}
+
+export interface SignalsResponse extends AccountResponse {
+  signals: SignalRecord[];
+  pagination: CursorPagination;
+  filters?: Record<string, unknown>;
+  warnings?: unknown[];
+}
+
+export interface SignalDetailResponse extends AccountResponse {
+  signal?: SignalRecord;
+}
+
+export interface SignalCatalogResponse extends AccountResponse {
+  topics?: Array<Record<string, unknown>>;
+  catalog_version?: string;
+  capabilities?: Record<string, unknown>;
+}
+
+export interface MonitoringPricingResponse extends AccountResponse {
+  [key: string]: unknown;
+}
+
+export interface Monitor extends Record<string, unknown> {
+  id: string;
+  entity_id?: string;
+  status?: MonitorStatus;
+  poll_interval_days?: number;
+  label?: string | null;
+}
+
+export interface MonitorResponse extends AccountResponse {
+  monitor?: Monitor;
+  billing_cycle?: Record<string, unknown> | null;
+  recent_runs?: Array<Record<string, unknown>>;
+}
+
+export interface MonitorsResponse extends AccountResponse {
+  monitors?: Monitor[];
+}
+
+export interface CreateMonitorParams {
+  entityId: string;
+  pollIntervalDays: number;
+  endpointIds: string | ReadonlyArray<string>;
+  label?: string;
+  idempotencyKey?: string;
+}
+
+export interface WebhookEndpoint extends Record<string, unknown> {
+  id: string;
+  name?: string;
+  url?: string;
+  status?: WebhookEndpointStatus;
+}
+
+export interface WebhookEndpointResponse extends AccountResponse {
+  endpoint?: WebhookEndpoint;
+  signing_secret?: string;
+  verified?: boolean;
+}
+
+export interface WebhookEndpointsResponse extends AccountResponse {
+  endpoints?: WebhookEndpoint[];
+}
+
+export interface CreateWebhookEndpointParams {
+  name: string;
+  url: string;
+  headers?: Record<string, string>;
+  idempotencyKey?: string;
+}
+
+export interface WebhookDelivery extends Record<string, unknown> {
+  id: string;
+  endpoint_id?: string;
+  status?: WebhookDeliveryStatus;
+}
+
+export interface WebhookDeliveriesResponse extends AccountResponse {
+  deliveries?: WebhookDelivery[];
+}
+
+export interface WebhookDeliveryResponse extends AccountResponse {
+  delivery?: WebhookDelivery;
+}
+
+export interface WebhookEventSummary extends Record<string, unknown> {
+  id: string;
+  type?: WebhookEventType;
+}
+
+export interface WebhookEventsResponse extends AccountResponse {
+  events?: WebhookEventSummary[];
+}
+
+export interface WebhookEventEnvelope<
+  TData extends Record<string, unknown> = Record<string, unknown>,
+> extends Record<string, unknown> {
+  id: string;
+  event_id?: string;
+  type: string;
+  timestamp?: string;
+  schema_version?: number;
+  data: TData;
 }
 
 export interface EnrichmentOptions {

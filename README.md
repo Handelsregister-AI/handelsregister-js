@@ -2,10 +2,22 @@
 
 [![npm version](https://img.shields.io/npm/v/handelsregister.svg)](https://www.npmjs.com/package/handelsregister)
 [![npm downloads](https://img.shields.io/npm/dm/handelsregister.svg)](https://www.npmjs.com/package/handelsregister)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 
 Official Node.js SDK for accessing German company registry (Handelsregister) data via the handelsregister.ai API.
+
+## Features
+
+- Company and person lookup with typed enrichment data
+- Filtered organization search with lazy multi-page iteration
+- Official PDF and structured XML document downloads
+- Cursor-paginated Signals with the complete seven-topic taxonomy
+- Account profile, credits, usage, subscription, and API-key management
+- Organization Monitoring and complete webhook endpoint lifecycle
+- Durable idempotency and safe retry behavior for monitoring mutations
+- Receiver-side webhook signature verification and verification challenges
+- Bearer-token management and batch CSV/JSON/XLSX enrichment
 
 ## Installation
 
@@ -71,6 +83,23 @@ const client = new Handelsregister({ bearerToken: 'your-bearer-token' });
 ```
 
 You can mint and revoke tokens with the `createToken` / `listTokens` / `revokeToken` / `revokeAllTokens` methods (see Token Management below).
+
+For gateways or proxies that require additional headers, use `extraHeaders`.
+Authentication and User-Agent headers are managed by the SDK and cannot be
+overridden:
+
+```javascript
+const client = new Handelsregister({
+  apiKey: process.env.HANDELSREGISTER_API_KEY,
+  extraHeaders: {
+    'X-Gateway-Client-Id': process.env.GATEWAY_CLIENT_ID,
+    'X-Gateway-Client-Secret': process.env.GATEWAY_CLIENT_SECRET
+  }
+});
+```
+
+The same object can be supplied through `HANDELSREGISTER_EXTRA_HEADERS` as
+JSON. Explicit `extraHeaders` take precedence.
 
 ## API Reference
 
@@ -138,6 +167,24 @@ The typed `SearchOrganizationFilters` interface supports every documented
 identity, industry, status, location/radius, register, employee, balance-sheet,
 and profit-and-loss filter.
 
+Use `iterateSearchOrganizations` for lazy pagination beyond the 30-result
+per-request limit. Each fetched page is a separate billable request and the
+last request is sized to the exact `maxResults` remainder:
+
+```javascript
+for await (const organization of client.iterateSearchOrganizations({
+  q: 'technology München',
+  pageSize: 30,
+  maxResults: 100
+})) {
+  console.log(organization.entity_id, organization.name);
+}
+```
+
+The friendly flat financial filters are automatically translated to the
+current nested `financial_filters` wire format. `company_size_category` is
+sent using the current `emp_size_category` wire name.
+
 #### `fetchPerson(params)`
 
 Look up a person profile by name with company context. Always uses AI enrichment (15 base credits).
@@ -188,6 +235,266 @@ Document types:
 - `AD` - Current company data (Aktuelle Daten)
 - `CD` - Historical data (Chronologische Daten)
 - `SI` - Structured information (XML)
+
+### Signals
+
+Signals expose commercial-register changes through seven stable topic codes.
+Catalog requests are free; successful list pages and detail requests cost 20
+credits. Pages contain 20 entries and use opaque cursor pagination.
+
+```javascript
+const { Handelsregister, SignalTopic } = require('handelsregister');
+
+const client = new Handelsregister();
+const filters = {
+  topics: [SignalTopic.CAPITAL_CHANGES, SignalTopic.TRANSFORMATIONS],
+  organizationIds: ['organization-id-one', 'organization-id-two'],
+  fromDate: '2026-07-01',
+  toDate: '2026-07-30'
+};
+
+const page = await client.listSignals(filters);
+const catalog = await client.getSignalCatalog();
+if (page.signals.length > 0) {
+  const detail = await client.getSignal(page.signals[0].event.id);
+  console.log(detail.signal?.event.topic);
+}
+```
+
+For manual pagination, preserve the original filters and pass
+`pagination.next_cursor` unchanged:
+
+```javascript
+if (page.pagination.next_cursor) {
+  const second = await client.listSignals({
+    ...filters,
+    cursor: page.pagination.next_cursor
+  });
+}
+```
+
+`iterateSignals` follows cursors lazily and stops without fetching another
+page when `maxResults` is reached:
+
+```javascript
+for await (const signal of client.iterateSignals({
+  topics: [SignalTopic.NEW_REGISTRATIONS],
+  maxResults: 50
+})) {
+  console.log(signal.event.id, signal.organization?.entity_id);
+}
+```
+
+Multiple `organizationIds` use OR semantics and are sent as one comma-separated
+query value. The seven `SignalTopic` values are:
+
+- `NEW_REGISTRATIONS`
+- `MASTER_DATA_CHANGES`
+- `CLOSURES`
+- `ROLE_HOLDER_CHANGES`
+- `CAPITAL_CHANGES`
+- `INSOLVENCIES` (Pro or Max)
+- `TRANSFORMATIONS` (Max)
+
+HTTP 403 `PLAN_REQUIRED` responses are exposed as
+`SubscriptionRequiredError` and cost no credits.
+
+### Account and Usage
+
+Account requests are free. API keys or Bearer tokens with `account:read` can
+read the profile, credits, usage, subscription, and masked API-key list.
+
+```javascript
+const account = await client.getAccount();
+const credits = await client.getAccountCredits();
+const subscription = await client.getAccountSubscription();
+const keys = await client.listApiKeys();
+
+const usage = await client.getAccountUsage({
+  fromDate: '2026-07-01',
+  toDate: '2026-07-30',
+  groupBy: 'day'
+});
+
+const page = await client.getAccountUsageTransactions({
+  endpoint: '/api/v1/signals',
+  perPage: 25
+});
+```
+
+`fromDate` and `toDate` accept ISO 8601 strings or `Date` objects. Usage
+ranges may span at most 366 days. Transactions use opaque cursors and can be
+consumed automatically:
+
+```javascript
+for await (const transaction of client.iterateAccountUsageTransactions({
+  perPage: 100
+})) {
+  console.log(transaction.endpoint, transaction.credits);
+}
+```
+
+API-key creation and revocation require a dashboard-created Bearer token with
+`account:keys`. Full keys are returned only once:
+
+```javascript
+const admin = new Handelsregister({ bearerToken: process.env.ADMIN_TOKEN });
+const created = await admin.createApiKey();
+await admin.revokeApiKey(created.api_key.id);
+```
+
+### Monitoring and Webhooks
+
+Monitoring watches selected organizations and pushes normalized Signals to
+registered HTTPS endpoints. Reads and management requests are free; a newly
+activated monitor starts with the current 10-credit cycle floor. Use
+`getMonitoringPricing()` to retrieve the current policy and topic
+entitlements before creating or resuming monitors.
+
+Authentication is intentionally separated:
+
+- Monitor reads and lifecycle operations accept an API key or a Bearer token
+  with `account:read` and `monitoring:manage`.
+- Creating, rotating, enabling, disabling, or archiving webhook endpoints
+  requires a Bearer token with `account:read` and `account:keys`.
+
+The following example shows a complete disposable lifecycle. Store the
+one-time signing secrets securely and never commit them to source control.
+
+```javascript
+const { setTimeout: delay } = require('node:timers/promises');
+const { Handelsregister } = require('handelsregister');
+
+const client = new Handelsregister({
+  apiKey: process.env.HANDELSREGISTER_API_KEY
+});
+const admin = new Handelsregister({ bearerToken: process.env.ADMIN_TOKEN });
+
+let endpointId;
+let monitorId;
+
+try {
+  const createdEndpoint = await admin.createWebhookEndpoint({
+    name: 'Production receiver',
+    url: 'https://hooks.example.com/handelsregister',
+    headers: { 'x-tenant': 'customer-42' }
+  });
+  endpointId = createdEndpoint.endpoint.id;
+  const signingSecret = createdEndpoint.signing_secret; // returned only once
+
+  const verification = await admin.verifyWebhookEndpoint(endpointId);
+  if (verification.verified === false) {
+    throw new Error('Receiver verification failed');
+  }
+
+  const rotated = await admin.rotateWebhookEndpointSecret(endpointId);
+  const rotatedSigningSecret = rotated.signing_secret; // returned only once
+  await admin.testWebhookEndpoint(endpointId);
+
+  const pricing = await client.getMonitoringPricing(7);
+  console.log(pricing);
+
+  const createdMonitor = await client.createMonitor({
+    entityId: 'organization-entity-id',
+    pollIntervalDays: 7,
+    endpointIds: [endpointId],
+    label: 'Important customer'
+  });
+  monitorId = createdMonitor.monitor.id;
+
+  // Baseline processing is asynchronous: initializing -> active.
+  let monitor = createdMonitor.monitor;
+  while (monitor.status === 'initializing') {
+    await delay(2_000);
+    monitor = (await client.getMonitor(monitorId)).monitor;
+  }
+  if (monitor.status !== 'active') {
+    throw new Error(`Monitor activation stopped in ${monitor.status}`);
+  }
+
+  await client.updateMonitor(monitorId, 14);
+  await client.pauseMonitor(monitorId);
+  await client.resumeMonitor(monitorId);
+
+  // Disabling the only endpoint parks the monitor in paused_configuration.
+  await admin.disableWebhookEndpoint(endpointId);
+  await admin.enableWebhookEndpoint(endpointId);
+  await client.resumeMonitor(monitorId);
+
+  const deliveries = await client.listWebhookDeliveries(endpointId);
+  const events = await client.listWebhookEvents();
+  console.log(deliveries, events);
+} finally {
+  // Archiving is recoverable history cleanup, not a hard delete.
+  if (monitorId) await client.archiveMonitor(monitorId);
+  if (endpointId) await admin.archiveWebhookEndpoint(endpointId);
+}
+```
+
+Monitoring mutations do not accept a pricing-policy version. The current
+policy returned by `getMonitoringPricing` is informational. Every mutation
+gets an automatically generated `Idempotency-Key`, reused across safe internal
+retries. Supply an explicit key as the last argument—or `idempotencyKey` when
+creating resources—for durability across process restarts. Inspect
+`client.lastIdempotencyStatus` for `created` or `replayed`.
+
+HTTP 409 idempotency ambiguity is never retried. Webhook verification and test
+operations retry only rate limiting and the pre-operation 503 kill switch,
+because other 5xx results may mean the receiver was already contacted. A
+normal failed verification challenge is returned as `{ verified: false }`
+even though the API uses HTTP 422.
+
+The full public method surface is:
+
+```javascript
+await client.getMonitoringPricing(7);
+await client.listMonitors();
+await client.createMonitor({ entityId, pollIntervalDays: 7, endpointIds });
+await client.getMonitor(monitorId);
+await client.updateMonitor(monitorId, 14);
+await client.pauseMonitor(monitorId);
+await client.resumeMonitor(monitorId);
+await client.archiveMonitor(monitorId);
+
+await admin.listWebhookEndpoints();
+await admin.createWebhookEndpoint({ name, url, headers });
+await admin.verifyWebhookEndpoint(endpointId);
+await admin.rotateWebhookEndpointSecret(endpointId);
+await admin.testWebhookEndpoint(endpointId);
+await admin.enableWebhookEndpoint(endpointId);
+await admin.disableWebhookEndpoint(endpointId);
+await admin.archiveWebhookEndpoint(endpointId);
+
+await client.listWebhookDeliveries(endpointId);
+await client.retryWebhookDelivery(deliveryId);
+await client.listWebhookEvents();
+```
+
+### Receiving Signed Webhooks
+
+Always verify the exact raw request bytes before JSON parsing and deduplicate
+at-least-once delivery using the event `id`:
+
+```javascript
+const {
+  constructEvent,
+  verificationResponseHeaders
+} = require('handelsregister');
+
+const event = constructEvent(rawBodyBuffer, requestHeaders, signingSecret);
+if (event.type === 'endpoint.verification') {
+  return {
+    status: 204,
+    headers: verificationResponseHeaders(event)
+  };
+}
+```
+
+`verifyWebhookSignature` validates the `v1,<base64>` HMAC-SHA256 signature
+over `webhook-id.webhook-timestamp.raw_body`. It accepts an array containing
+the current and predecessor secrets during rotation and enforces a default
+five-minute timestamp tolerance. Pass `null` as its fourth argument only when
+timestamp checking is handled elsewhere.
 
 ### Token Management
 
@@ -297,6 +604,35 @@ handelsregister document "KONUX GmbH" --type SI --output konux.xml
 handelsregister enrich companies.csv \
   --query-properties name=company_name location=city \
   --feature related_persons --feature financial_kpi
+
+# Monitoring reads and lifecycle
+handelsregister monitors pricing --interval 7
+handelsregister monitors list
+handelsregister monitors show mon_01hzy2q6j3g5m8v9x0abcde123
+handelsregister monitors create \
+  --entity-id organization-entity-id \
+  --interval 7 \
+  --endpoint wep_01hzy2q6j3g5m8v9x0abcde123 \
+  --label "Important customer"
+handelsregister monitors update mon_01hzy2q6j3g5m8v9x0abcde123 --interval 14
+handelsregister monitors pause mon_01hzy2q6j3g5m8v9x0abcde123
+handelsregister monitors resume mon_01hzy2q6j3g5m8v9x0abcde123
+handelsregister monitors archive mon_01hzy2q6j3g5m8v9x0abcde123
+
+# Webhook endpoint and delivery management
+handelsregister webhooks list
+handelsregister webhooks create \
+  --name "Production receiver" \
+  --url https://hooks.example.com/handelsregister
+handelsregister webhooks verify wep_01hzy2q6j3g5m8v9x0abcde123
+handelsregister webhooks rotate-secret wep_01hzy2q6j3g5m8v9x0abcde123
+handelsregister webhooks test wep_01hzy2q6j3g5m8v9x0abcde123
+handelsregister webhooks disable wep_01hzy2q6j3g5m8v9x0abcde123
+handelsregister webhooks enable wep_01hzy2q6j3g5m8v9x0abcde123
+handelsregister webhooks deliveries --endpoint wep_01hzy2q6j3g5m8v9x0abcde123
+handelsregister webhooks retry del_01hzy2q6j3g5m8v9x0abcde123
+handelsregister webhooks events
+handelsregister webhooks archive wep_01hzy2q6j3g5m8v9x0abcde123
 ```
 
 ### Person Class
@@ -374,8 +710,10 @@ The SDK provides specific error classes:
 const { 
   HandelsregisterError,
   AuthenticationError,
-  PaymentRequiredError,
-  ForbiddenError,
+  InsufficientCreditsError,
+  SubscriptionRequiredError,
+  IdempotencyConflictError,
+  ServiceUnavailableError,
   NotFoundError,
   RequestTimeoutError,
   RateLimitError,
@@ -389,17 +727,20 @@ try {
     console.error('Invalid API key');
   } else if (error instanceof RateLimitError) {
     console.error('Rate limit exceeded');
-  } else if (error instanceof ForbiddenError &&
-             error.errorCode === 'subscription_required') {
-    console.error('fetch-person requires Plus, Pro, or Max');
+  } else if (error instanceof SubscriptionRequiredError) {
+    console.error('This endpoint or Signal topic requires another plan');
+  } else if (error instanceof IdempotencyConflictError) {
+    console.error('Inspect the stored operation before retrying');
   }
 }
 ```
 
 Errors preserve the parsed API response on `error.response`, the HTTP status on
-`error.statusCode`, and machine-readable API codes such as
-`subscription_required` on `error.errorCode`. HTTP 408 responses are not
-automatically retried, avoiding duplicate paid AI work.
+`error.statusCode`, response headers on `error.responseHeaders`, and
+machine-readable API codes on `error.errorCode`. The legacy
+`PaymentRequiredError`, `ForbiddenError`, and `ValidationError` classes remain
+available; their current specialized subclasses continue to satisfy
+`instanceof` checks against those base classes.
 
 ## TypeScript Support
 
@@ -424,12 +765,14 @@ See the `examples/` directory for more detailed examples:
 - `search.js` - Paginated search with filters
 - `person.js` - Person lookup using the `Person` class
 - `token-management.js` - Create / list / revoke bearer tokens
+- `account-signals.js` - Account reads and lazy Signals iteration
+- `monitoring.js` - Monitoring reads and receiver-side webhook verification
 - `enrichment.js` - Batch data enrichment
 - `typescript-example.ts` - TypeScript example
 
 ## License
 
-MIT
+GNU Affero General Public License v3.0 — see [LICENSE](LICENSE).
 
 ## Support
 

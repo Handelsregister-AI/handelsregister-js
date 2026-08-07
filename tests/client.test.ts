@@ -343,7 +343,14 @@ describe('Handelsregister Client', () => {
           (query) =>
             query.q === undefined &&
             query.limit === '30' &&
-            query.filters === JSON.stringify(filters),
+            query.filters ===
+              JSON.stringify({
+                legal_form_code: ['GmbH', 'UG'],
+                active: true,
+                financial_filters: {
+                  pl_revenue: { gte: 1_000_000, lte: 5_000_000 },
+                },
+              }),
         )
         .reply(200, mockResponse);
 

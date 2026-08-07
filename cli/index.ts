@@ -330,6 +330,254 @@ program
     }
   });
 
+// ----- monitoring -----
+
+const monitorsCommand = program
+  .command('monitors')
+  .description('Manage organization monitors');
+
+monitorsCommand
+  .command('pricing')
+  .description('Show monitoring pricing and topic entitlements')
+  .option('--interval <days>', 'Poll interval for the estimate (1..30)')
+  .action(async (options: any) => {
+    try {
+      const interval = options.interval
+        ? parseInt(options.interval, 10)
+        : undefined;
+      console.log(
+        JSON.stringify(await buildClient().getMonitoringPricing(interval), null, 2),
+      );
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+monitorsCommand
+  .command('list')
+  .description('List non-archived monitors')
+  .action(async () => {
+    try {
+      console.log(JSON.stringify(await buildClient().listMonitors(), null, 2));
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+monitorsCommand
+  .command('show <id>')
+  .description('Show one monitor and its recent runs')
+  .action(async (id: string) => {
+    try {
+      console.log(JSON.stringify(await buildClient().getMonitor(id), null, 2));
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+monitorsCommand
+  .command('create')
+  .description('Create a monitor and queue its baseline')
+  .requiredOption('--entity-id <id>', 'Organization entity ID')
+  .requiredOption('--interval <days>', 'Poll interval (1..30)')
+  .requiredOption('--endpoint <ids...>', 'One or more webhook endpoint IDs')
+  .option('--label <label>', 'Optional monitor label')
+  .option('--idempotency-key <key>', 'Durable idempotency key')
+  .action(async (options: any) => {
+    try {
+      const result = await buildClient().createMonitor({
+        entityId: options.entityId,
+        pollIntervalDays: parseInt(options.interval, 10),
+        endpointIds: options.endpoint,
+        label: options.label,
+        idempotencyKey: options.idempotencyKey,
+      });
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+monitorsCommand
+  .command('update <id>')
+  .description('Change a monitor poll interval')
+  .requiredOption('--interval <days>', 'Poll interval (1..30)')
+  .option('--idempotency-key <key>', 'Durable idempotency key')
+  .action(async (id: string, options: any) => {
+    try {
+      const result = await buildClient().updateMonitor(
+        id,
+        parseInt(options.interval, 10),
+        options.idempotencyKey,
+      );
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+for (const action of ['pause', 'resume', 'archive'] as const) {
+  monitorsCommand
+    .command(`${action} <id>`)
+    .description(`${action[0].toUpperCase()}${action.slice(1)} a monitor`)
+    .option('--idempotency-key <key>', 'Durable idempotency key')
+    .action(async (id: string, options: any) => {
+      try {
+        const client = buildClient();
+        const result =
+          action === 'pause'
+            ? await client.pauseMonitor(id, options.idempotencyKey)
+            : action === 'resume'
+              ? await client.resumeMonitor(id, options.idempotencyKey)
+              : await client.archiveMonitor(id, options.idempotencyKey);
+        console.log(JSON.stringify(result, null, 2));
+      } catch (error: any) {
+        console.error(chalk.red(`Error: ${error.message}`));
+        process.exit(1);
+      }
+    });
+}
+
+// ----- webhooks -----
+
+const webhooksCommand = program
+  .command('webhooks')
+  .description('Manage monitoring webhook endpoints and deliveries');
+
+webhooksCommand
+  .command('list')
+  .description('List non-archived webhook endpoints')
+  .action(async () => {
+    try {
+      console.log(
+        JSON.stringify(await buildClient().listWebhookEndpoints(), null, 2),
+      );
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+webhooksCommand
+  .command('create')
+  .description('Register a webhook endpoint')
+  .requiredOption('--name <name>', 'Display name')
+  .requiredOption('--url <url>', 'Public HTTPS receiver URL')
+  .option('--headers <json>', 'Optional JSON object of write-only headers')
+  .option('--idempotency-key <key>', 'Durable idempotency key')
+  .action(async (options: any) => {
+    try {
+      const headers = options.headers ? JSON.parse(options.headers) : undefined;
+      const result = await buildClient().createWebhookEndpoint({
+        name: options.name,
+        url: options.url,
+        headers,
+        idempotencyKey: options.idempotencyKey,
+      });
+      console.log(JSON.stringify(result, null, 2));
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+const webhookActions = [
+  'verify',
+  'test',
+  'enable',
+  'disable',
+  'rotate-secret',
+  'archive',
+] as const;
+
+for (const action of webhookActions) {
+  webhooksCommand
+    .command(`${action} <id>`)
+    .description(`${action} a webhook endpoint`)
+    .option('--idempotency-key <key>', 'Durable idempotency key')
+    .action(async (id: string, options: any) => {
+      try {
+        const client = buildClient();
+        let result: unknown;
+        if (action === 'verify') {
+          result = await client.verifyWebhookEndpoint(id, options.idempotencyKey);
+        } else if (action === 'test') {
+          result = await client.testWebhookEndpoint(id, options.idempotencyKey);
+        } else if (action === 'enable') {
+          result = await client.enableWebhookEndpoint(id, options.idempotencyKey);
+        } else if (action === 'disable') {
+          result = await client.disableWebhookEndpoint(id, options.idempotencyKey);
+        } else if (action === 'rotate-secret') {
+          result = await client.rotateWebhookEndpointSecret(
+            id,
+            options.idempotencyKey,
+          );
+        } else {
+          result = await client.archiveWebhookEndpoint(id, options.idempotencyKey);
+        }
+        console.log(JSON.stringify(result, null, 2));
+      } catch (error: any) {
+        console.error(chalk.red(`Error: ${error.message}`));
+        process.exit(1);
+      }
+    });
+}
+
+webhooksCommand
+  .command('deliveries')
+  .description('List recent webhook deliveries')
+  .option('--endpoint <id>', 'Filter by webhook endpoint')
+  .action(async (options: any) => {
+    try {
+      console.log(
+        JSON.stringify(
+          await buildClient().listWebhookDeliveries(options.endpoint),
+          null,
+          2,
+        ),
+      );
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+webhooksCommand
+  .command('retry <id>')
+  .description('Retry an eligible failed delivery')
+  .option('--idempotency-key <key>', 'Durable idempotency key')
+  .action(async (id: string, options: any) => {
+    try {
+      console.log(
+        JSON.stringify(
+          await buildClient().retryWebhookDelivery(id, options.idempotencyKey),
+          null,
+          2,
+        ),
+      );
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
+webhooksCommand
+  .command('events')
+  .description('List recent webhook events')
+  .action(async () => {
+    try {
+      console.log(JSON.stringify(await buildClient().listWebhookEvents(), null, 2));
+    } catch (error: any) {
+      console.error(chalk.red(`Error: ${error.message}`));
+      process.exit(1);
+    }
+  });
+
 // ----- enrich (existing) -----
 
 program
