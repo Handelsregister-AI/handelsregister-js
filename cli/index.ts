@@ -84,6 +84,12 @@ program
   .option('--limit <n>', 'Results per page (1..30)', '10')
   .option('--skip <n>', 'Pagination offset', '0')
   .option('--ai-mode', 'Enable AI-assisted search (5 credits)')
+  .option('--sort <field>', 'Sort field (for example revenue or registration_date)')
+  .option('--order <direction>', 'Sort direction (asc or desc)')
+  .option(
+    '--match-context',
+    'Include ownership, executive, and lifecycle values that matched',
+  )
   .option('--json', 'Output as JSON')
   .action(async (query: string | undefined, options: any) => {
     try {
@@ -104,6 +110,9 @@ program
         limit: parseInt(options.limit, 10),
         filters: Object.keys(filters).length > 0 ? filters : undefined,
         aiMode: options.aiMode ? true : undefined,
+        sort: options.sort,
+        order: options.order,
+        matchContext: options.matchContext ? true : undefined,
       });
 
       if (options.json) {

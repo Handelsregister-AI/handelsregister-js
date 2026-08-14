@@ -333,7 +333,7 @@ describe('Handelsregister Client', () => {
 
     it('supports a filter-only search without q', async () => {
       const filters = {
-        legal_form_code: ['GmbH', 'UG'],
+        legal_form_code: 'GmbH',
         active: true,
         pl_revenue: { gte: 1_000_000, lte: 5_000_000 },
       };
@@ -345,7 +345,7 @@ describe('Handelsregister Client', () => {
             query.limit === '30' &&
             query.filters ===
               JSON.stringify({
-                legal_form_code: ['GmbH', 'UG'],
+                legal_form_code: 'GmbH',
                 active: true,
                 financial_filters: {
                   pl_revenue: { gte: 1_000_000, lte: 5_000_000 },

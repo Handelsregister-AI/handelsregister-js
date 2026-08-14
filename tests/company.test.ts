@@ -448,6 +448,18 @@ describe('Company Class', () => {
         control: { controlled_by: [], controls: [], former: [] },
         summary: { total_transactions: 1 },
       },
+      network: {
+        depth: 1,
+        nodes: [
+          {
+            node_id: 'organization:current',
+            entity_id: 'current',
+            name: 'Current Shape AG',
+            is_root: true,
+          },
+        ],
+        connections: [],
+      },
     };
 
     beforeEach(async () => {
@@ -493,6 +505,7 @@ describe('Company Class', () => {
         company.mergersAndAcquisitions?.summary?.total_transactions,
       ).toBe(1);
       expect(company.websiteContent).toContain('# Current Shape AG');
+      expect(company.network?.nodes?.[0].is_root).toBe(true);
     });
   });
 

@@ -23,6 +23,7 @@ import {
   SearchOrganizationFilters,
   AccountResponse,
   AccountCreditsResponse,
+  AccountSubscriptionResponse,
   AccountUsageParams,
   AccountUsageResponse,
   AccountUsageTransactionsParams,
@@ -48,7 +49,7 @@ import {
   WebhookEventsResponse,
   IterateSearchOrganizationsParams,
   SearchResultItem,
-} from './types';
+} from './types.js';
 import {
   HandelsregisterError,
   AuthenticationError,
@@ -67,17 +68,24 @@ import {
   IdempotencyKeyRequiredError,
   ServerError,
   ServiceUnavailableError,
-} from './errors';
+} from './errors.js';
 import {
+  INSOLVENCY_STATUSES,
+  LEGAL_FORM_LIABILITY_TYPES,
   MONITOR_MAX_POLL_INTERVAL_DAYS,
   MONITOR_MIN_POLL_INTERVAL_DAYS,
+  ORGANIZATION_STATUSES,
+  OWNERSHIP_STRUCTURES,
   SEARCH_ORGANIZATIONS_MAX_LIMIT,
+  SEARCH_ORGANIZATIONS_MAX_QUERY_LENGTH,
+  SEARCH_SORT_FIELDS,
   SIGNAL_TOPICS,
-} from './constants';
-import { Cache, generateCacheKey } from './utils/cache';
-import { retry, sleep } from './utils/retry';
-import { FileRecord, readFile, writeFile } from './utils/fileHandler';
-import { version } from './version';
+  SORT_ORDERS,
+} from './constants.js';
+import { Cache, generateCacheKey } from './utils/cache.js';
+import { retry, sleep } from './utils/retry.js';
+import { FileRecord, readFile, writeFile } from './utils/fileHandler.js';
+import { version } from './version.js';
 
 const DEFAULT_BASE_URL = 'https://handelsregister.ai/api/v1/';
 const DEFAULT_TIMEOUT = 90000; // 90 seconds
@@ -449,7 +457,6 @@ export class Handelsregister {
     if (!data || typeof data !== 'object') return fallback;
 
     const response = data as Record<string, unknown>;
-    if (typeof response.error === 'string' && response.error) return response.error;
     if (response.error && typeof response.error === 'object') {
       const errorObject = response.error as Record<string, unknown>;
       for (const key of ['message', 'detail', 'title', 'code']) {
@@ -475,10 +482,13 @@ export class Handelsregister {
         .filter((message): message is string => typeof message === 'string');
       if (messages.length > 0) return messages.join('; ');
     }
-    for (const key of ['message', 'title', 'code']) {
+    for (const key of ['message', 'title']) {
       const value = response[key];
       if (typeof value === 'string' && value) return value;
     }
+
+    if (typeof response.error === 'string' && response.error) return response.error;
+    if (typeof response.code === 'string' && response.code) return response.code;
 
     return fallback;
   }
@@ -550,6 +560,52 @@ export class Handelsregister {
   // fetch-organization
   // ------------------------------------------------------------------
 
+  private async networkSubscriptionAccess(): Promise<boolean | undefined> {
+    let account: AccountSubscriptionResponse;
+    try {
+      account = await this.getAccountSubscription();
+    } catch (error) {
+      if (error instanceof HandelsregisterError) return undefined;
+      throw error;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(account, 'subscription')) {
+      if (account.subscription === null) return false;
+      if (!account.subscription || typeof account.subscription !== 'object') {
+        return undefined;
+      }
+      const plan = account.subscription.plan;
+      if (typeof plan !== 'string' || !plan.trim()) return undefined;
+      return ['pro', 'max'].includes(plan.trim().toLowerCase());
+    }
+
+    // Retain compatibility with the older direct `{ plan: "max" }` shape.
+    if (typeof account.plan !== 'string' || !account.plan.trim()) {
+      return undefined;
+    }
+    return ['pro', 'max'].includes(account.plan.trim().toLowerCase());
+  }
+
+  private async requireNetworkSubscription(): Promise<void> {
+    if ((await this.networkSubscriptionAccess()) !== false) return;
+    const message =
+      "The 'network' feature requires an active Pro or Max subscription.";
+    const payload = {
+      error: 'subscription_required',
+      meta: {
+        message,
+        required_plans: ['pro', 'max'],
+        blocked_features: ['network'],
+        request_credit_cost: 0,
+      },
+    };
+    throw new SubscriptionRequiredError(
+      message,
+      payload,
+      'subscription_required',
+    );
+  }
+
   async fetchOrganization(params: SearchParams | string): Promise<CompanyData> {
     const searchParams: SearchParams =
       typeof params === 'string' ? { q: params } : params;
@@ -583,6 +639,13 @@ export class Handelsregister {
     if (cacheKey && this.cache?.has(cacheKey)) {
       const cached = this.cache.get(cacheKey);
       if (cached) return cached as CompanyData;
+    }
+
+    // Accounts below Pro currently receive a billable base profile while the
+    // service silently omits `network`. The free Account API lets the SDK fail
+    // clearly before making that organization request.
+    if (features.includes('network')) {
+      await this.requireNetworkSubscription();
     }
 
     const queryParams: Record<string, unknown> = { q: query };
@@ -648,11 +711,26 @@ export class Handelsregister {
     if (q && q.length < 2) {
       throw new ValidationError('Search query (q) must be at least 2 characters');
     }
+    if (q && q.length > SEARCH_ORGANIZATIONS_MAX_QUERY_LENGTH) {
+      throw new ValidationError(
+        `Search query (q) must be at most ${SEARCH_ORGANIZATIONS_MAX_QUERY_LENGTH} characters`,
+      );
+    }
     if (p.limit !== undefined && (p.limit < 1 || p.limit > 30)) {
       throw new ValidationError('limit must be between 1 and 30');
     }
     if (p.skip !== undefined && p.skip < 0) {
       throw new ValidationError('skip must be >= 0');
+    }
+    const sort = this.normalizeChoice('sort', p.sort, SEARCH_SORT_FIELDS);
+    const order = this.normalizeChoice('order', p.order, SORT_ORDERS);
+    if (p.matchContext !== undefined && typeof p.matchContext !== 'boolean') {
+      throw new ValidationError('matchContext must be a boolean');
+    }
+    if (sort === 'distance' && !filters?.location_coordinates) {
+      throw new ValidationError(
+        "sort='distance' requires filters.location_coordinates",
+      );
     }
     const cacheKey = this.cache
       ? generateCacheKey({
@@ -662,6 +740,9 @@ export class Handelsregister {
           limit: p.limit ?? 10,
           filters: filters ? JSON.stringify(filters) : '',
           ai_mode: this.normalizeSearchAiMode(p.aiMode),
+          sort,
+          order,
+          match_context: p.matchContext,
         })
       : null;
 
@@ -677,6 +758,11 @@ export class Handelsregister {
     if (filters) queryParams.filters = JSON.stringify(filters);
     const aiMode = this.normalizeSearchAiMode(p.aiMode);
     if (aiMode) queryParams.ai_mode = aiMode;
+    if (sort) queryParams.sort = sort;
+    if (order) queryParams.order = order;
+    if (p.matchContext !== undefined) {
+      queryParams.match_context = Number(p.matchContext);
+    }
 
     const response = await this.requestWithRetry<SearchOrganizationsResponse>(() =>
       this.httpClient.get('/search-organizations', { params: queryParams }),
@@ -704,31 +790,170 @@ export class Handelsregister {
     return value === true || value === 'on-default' ? 'on-default' : undefined;
   }
 
+  private normalizeChoice(
+    name: string,
+    value: unknown,
+    allowed: readonly string[],
+  ): string | undefined {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new ValidationError(`${name} must be a non-empty string`);
+    }
+    const normalized = value.trim();
+    if (!allowed.includes(normalized)) {
+      throw new ValidationError(
+        `${name} must be one of: ${allowed.join(', ')}`,
+      );
+    }
+    return normalized;
+  }
+
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  }
+
+  private validateConditionObject(
+    group: string,
+    field: string,
+    value: unknown,
+  ): void {
+    if (!this.isRecord(value)) return;
+    const keys = Object.keys(value);
+    if (keys.length === 0) {
+      throw new ValidationError(
+        `Filter '${group}.${field}' condition must not be empty`,
+      );
+    }
+    const allowed = new Set(['gte', 'lte', 'gt', 'lt', 'eq', 'exists']);
+    const unknown = keys.filter((key) => !allowed.has(key)).sort();
+    if (unknown.length > 0) {
+      throw new ValidationError(
+        `Filter '${group}.${field}' contains unsupported operators: ${unknown.join(', ')}`,
+      );
+    }
+    if ('exists' in value && typeof value.exists !== 'boolean') {
+      throw new ValidationError(
+        `Filter '${group}.${field}.exists' must be a boolean`,
+      );
+    }
+  }
+
+  private conditionValues(value: unknown): unknown[] {
+    const values = this.isRecord(value)
+      ? Object.entries(value)
+          .filter(([key]) => key !== 'exists')
+          .map(([, item]) => item)
+      : Array.isArray(value)
+        ? value
+        : [value];
+    const flattened: unknown[] = [];
+    for (const item of values) {
+      if (Array.isArray(item)) {
+        for (const nested of item as unknown[]) flattened.push(nested);
+      } else {
+        flattened.push(item);
+      }
+    }
+    return flattened;
+  }
+
+  private validateAdvancedFilterGroup(
+    group: string,
+    value: unknown,
+    allowedFields: readonly string[],
+  ): Record<string, unknown> {
+    if (!this.isRecord(value)) {
+      throw new ValidationError(`Filter '${group}' must be an object`);
+    }
+    const fields = Object.keys(value);
+    if (fields.length === 0) {
+      throw new ValidationError(`Filter '${group}' must not be empty`);
+    }
+    const allowed = new Set(allowedFields);
+    const unknown = fields.filter((field) => !allowed.has(field)).sort();
+    if (unknown.length > 0) {
+      throw new ValidationError(
+        `Filter '${group}' contains unsupported fields: ${unknown.join(', ')}`,
+      );
+    }
+    for (const [field, condition] of Object.entries(value)) {
+      this.validateConditionObject(group, field, condition);
+    }
+    return { ...value };
+  }
+
   private prepareSearchFilters(
     filters: SearchOrganizationFilters,
   ): SearchOrganizationFilters {
-    const data: SearchOrganizationFilters = { ...filters };
-    const existingFinancial = data.financial_filters;
+    if (!this.isRecord(filters)) {
+      throw new ValidationError('filters must be an object');
+    }
+    const data: Record<string, unknown> = { ...filters };
+
     if (
-      existingFinancial !== undefined &&
-      (!existingFinancial ||
-        typeof existingFinancial !== 'object' ||
-        Array.isArray(existingFinancial))
+      data.legal_form_code !== undefined &&
+      (typeof data.legal_form_code !== 'string' ||
+        !data.legal_form_code.trim())
     ) {
+      throw new ValidationError(
+        'legal_form_code must be one non-empty string',
+      );
+    }
+    if (data.active !== undefined && typeof data.active !== 'boolean') {
+      throw new ValidationError('active must be a boolean');
+    }
+    this.normalizeChoice('status', data.status, ORGANIZATION_STATUSES);
+    this.normalizeChoice(
+      'legal_form_liability_type',
+      data.legal_form_liability_type,
+      LEGAL_FORM_LIABILITY_TYPES,
+    );
+
+    if (
+      data.company_size_category !== undefined &&
+      (typeof data.company_size_category !== 'string' ||
+        !['micro', 'small', 'medium', 'large'].includes(
+          data.company_size_category,
+        ))
+    ) {
+      throw new ValidationError(
+        'company_size_category must be one of: micro, small, medium, large',
+      );
+    }
+
+    const existingFinancial = data.financial_filters;
+    if (existingFinancial !== undefined && !this.isRecord(existingFinancial)) {
       throw new ValidationError('financial_filters must be an object');
     }
     const financialFilters: Record<string, unknown> = existingFinancial
-      ? { ...(existingFinancial as Record<string, unknown>) }
+      ? { ...existingFinancial }
       : {};
+    delete data.financial_filters;
     for (const key of FINANCIAL_FILTER_KEYS) {
       if (data[key] !== undefined) {
         financialFilters[key] = data[key];
         delete data[key];
       }
     }
+    for (const [key, value] of Object.entries(financialFilters)) {
+      if (!this.isRecord(value) || Object.keys(value).length === 0) {
+        throw new ValidationError(
+          `Financial range filter '${key}' must be a non-empty object`,
+        );
+      }
+      const unknown = Object.keys(value)
+        .filter((rangeKey) => rangeKey !== 'gte' && rangeKey !== 'lte')
+        .sort();
+      if (unknown.length > 0) {
+        throw new ValidationError(
+          `Financial range filter '${key}' contains unsupported keys: ${unknown.join(', ')}`,
+        );
+      }
+    }
     if (Object.keys(financialFilters).length > 0) {
       data.financial_filters = financialFilters;
     }
+
     if (
       data.company_size_category !== undefined &&
       data.emp_size_category === undefined
@@ -736,46 +961,141 @@ export class Handelsregister {
       data.emp_size_category = data.company_size_category;
       delete data.company_size_category;
     }
-    if (
-      data.location_max_distance_km !== undefined &&
-      !data.location_coordinates
-    ) {
-      throw new ValidationError(
-        'location_max_distance_km requires location_coordinates',
-      );
-    }
-    if (
-      data.location_max_distance_km !== undefined &&
-      (typeof data.location_max_distance_km !== 'number' ||
-        data.location_max_distance_km < 1 ||
-        data.location_max_distance_km > 100)
-    ) {
-      throw new ValidationError(
-        'location_max_distance_km must be between 1 and 100',
-      );
-    }
-    const rangeValues = {
-      ...data,
-      ...financialFilters,
-    };
-    for (const [key, value] of Object.entries(rangeValues)) {
-      if (
-        !value ||
-        typeof value !== 'object' ||
-        Array.isArray(value) ||
-        (!('gte' in value) && !('lte' in value))
-      ) {
-        continue;
+
+    const rawCoordinates = data.location_coordinates;
+    if (rawCoordinates !== undefined) {
+      let coordinates: Record<string, unknown>;
+      if (Array.isArray(rawCoordinates)) {
+        if (rawCoordinates.length !== 2) {
+          throw new ValidationError(
+            "location_coordinates must contain exactly 'lat' and 'lon'",
+          );
+        }
+        coordinates = { lat: rawCoordinates[0], lon: rawCoordinates[1] };
+      } else if (this.isRecord(rawCoordinates)) {
+        coordinates = { ...rawCoordinates };
+        if (coordinates.lat === undefined && coordinates.latitude !== undefined) {
+          coordinates.lat = coordinates.latitude;
+        }
+        if (coordinates.lon === undefined && coordinates.longitude !== undefined) {
+          coordinates.lon = coordinates.longitude;
+        }
+        delete coordinates.latitude;
+        delete coordinates.longitude;
+      } else {
+        throw new ValidationError('location_coordinates must be an object');
       }
-      const unknownKeys = Object.keys(value).filter(
-        (rangeKey) => rangeKey !== 'gte' && rangeKey !== 'lte',
-      );
-      if (unknownKeys.length > 0) {
+      const coordinateKeys = Object.keys(coordinates).sort();
+      if (
+        coordinateKeys.length !== 2 ||
+        !coordinateKeys.includes('lat') ||
+        !coordinateKeys.includes('lon')
+      ) {
         throw new ValidationError(
-          `Range filter '${key}' contains unsupported keys: ${unknownKeys.join(', ')}`,
+          "location_coordinates must contain exactly 'lat' and 'lon'",
+        );
+      }
+      const lat = coordinates.lat;
+      const lon = coordinates.lon;
+      if (typeof lat !== 'number' || !Number.isFinite(lat) || lat < -90 || lat > 90) {
+        throw new ValidationError("location coordinate 'lat' must be between -90 and 90");
+      }
+      if (typeof lon !== 'number' || !Number.isFinite(lon) || lon < -180 || lon > 180) {
+        throw new ValidationError(
+          "location coordinate 'lon' must be between -180 and 180",
+        );
+      }
+      data.location_coordinates = { lat, lon };
+    }
+
+    const distance = data.location_max_distance_km;
+    if (distance !== undefined) {
+      if (rawCoordinates === undefined) {
+        throw new ValidationError(
+          'location_max_distance_km requires location_coordinates',
+        );
+      }
+      if (
+        typeof distance !== 'number' ||
+        !Number.isFinite(distance) ||
+        distance < 1 ||
+        distance > 100
+      ) {
+        throw new ValidationError(
+          'location_max_distance_km must be between 1 and 100',
+        );
+      }
+    } else if (rawCoordinates !== undefined) {
+      throw new ValidationError(
+        'location_coordinates requires location_max_distance_km',
+      );
+    }
+
+    const advancedGroups: Record<string, readonly string[]> = {
+      ownership_filters: [
+        'structure',
+        'owner_managed',
+        'likely_family_owned',
+        'largest_share_ratio',
+        'oldest_owner_birth_date',
+        'youngest_owner_birth_date',
+      ],
+      executive_filters: [
+        'md_oldest_birth_date',
+        'md_youngest_birth_date',
+      ],
+      lifecycle_filters: [
+        'insolvency_active',
+        'insolvency_status',
+        'insolvency_opened_date',
+      ],
+    };
+    for (const [group, allowedFields] of Object.entries(advancedGroups)) {
+      if (data[group] !== undefined) {
+        data[group] = this.validateAdvancedFilterGroup(
+          group,
+          data[group],
+          allowedFields,
         );
       }
     }
+
+    const ownership = data.ownership_filters;
+    if (this.isRecord(ownership) && ownership.structure !== undefined) {
+      for (const value of this.conditionValues(ownership.structure)) {
+        if (!OWNERSHIP_STRUCTURES.includes(value as never)) {
+          throw new ValidationError(
+            `ownership_filters.structure contains an unsupported value: ${String(value)}`,
+          );
+        }
+      }
+    }
+    if (this.isRecord(ownership) && ownership.largest_share_ratio !== undefined) {
+      for (const value of this.conditionValues(ownership.largest_share_ratio)) {
+        if (
+          typeof value !== 'number' ||
+          !Number.isFinite(value) ||
+          value < 0 ||
+          value > 1
+        ) {
+          throw new ValidationError(
+            'ownership_filters.largest_share_ratio values must be between 0 and 1',
+          );
+        }
+      }
+    }
+
+    const lifecycle = data.lifecycle_filters;
+    if (this.isRecord(lifecycle) && lifecycle.insolvency_status !== undefined) {
+      for (const value of this.conditionValues(lifecycle.insolvency_status)) {
+        if (!INSOLVENCY_STATUSES.includes(value as never)) {
+          throw new ValidationError(
+            `lifecycle_filters.insolvency_status contains an unsupported value: ${String(value)}`,
+          );
+        }
+      }
+    }
+
     return data;
   }
 
@@ -810,6 +1130,9 @@ export class Handelsregister {
         q: params.q,
         filters: params.filters,
         aiMode: params.aiMode,
+        sort: params.sort,
+        order: params.order,
+        matchContext: params.matchContext,
         skip: nextSkip,
         limit,
       });
@@ -1232,7 +1555,7 @@ export class Handelsregister {
     return this.iterateAccountUsageTransactions(params);
   }
 
-  async getAccountSubscription(): Promise<AccountResponse> {
+  async getAccountSubscription(): Promise<AccountSubscriptionResponse> {
     return this.getJson('/account/subscription');
   }
 

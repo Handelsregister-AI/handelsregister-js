@@ -9,8 +9,8 @@ Official Node.js SDK for accessing German company registry (Handelsregister) dat
 
 ## Features
 
-- Company and person lookup with typed enrichment data
-- Filtered organization search with lazy multi-page iteration
+- Company and person lookup with typed enrichment and relationship-network data
+- Advanced organization search with typed filters, sorting, match context, and lazy iteration
 - Official PDF and structured XML document downloads
 - Cursor-paginated Signals with the complete seven-topic taxonomy
 - Account profile, credits, usage, subscription, and API-key management
@@ -115,7 +115,8 @@ const data = await client.fetchOrganization({
   features: [
     'related_persons',
     'financial_kpi',
-    'mergers_and_acquisitions'
+    'mergers_and_acquisitions',
+    'network'
   ],
   aiSearch: true,            // sends ai_search=on-default; pass false to disable
   realtimeMode: false        // set to true for a live Handelsregister lookup (+10 credits)
@@ -126,26 +127,46 @@ console.log(
   data.related_persons?.current?.[0].role_representation_scheme?.history
 );
 console.log(data.mergers_and_acquisitions?.transactions);
+console.log(data.network?.nodes, data.network?.connections);
 ```
 
 The `aiSearch` option accepts a `boolean` or the literal string `'on-default' | 'off'`. The `realtimeMode` option accepts a `boolean` or the literal string `'handelsregister-default'`.
+
+The beta `network` feature requires a Pro or Max plan and costs 25 credits when
+data is returned, in addition to the 5-credit organization lookup. Before the
+billable request, the SDK checks the subscription through the free Account API.
+Lower-tier accounts receive `SubscriptionRequiredError` instead of a silently
+reduced base profile.
 
 #### `searchOrganizations(params)`
 
 Paginated search with optional filters.
 
 ```javascript
+const {
+  OrganizationStatus,
+  OwnershipStructure,
+  SearchSort,
+  SortOrder
+} = require('handelsregister');
+
 const result = await client.searchOrganizations({
-  q: 'tech',
   skip: 0,
   limit: 20,                     // 1..30
   filters: {
     postal_code: '80331',
-    legal_form_code: ['GmbH', 'UG'],
-    active: true,
-    pl_revenue: { gte: 1_000_000, lte: 5_000_000 }
+    legal_form_code: 'GmbH',
+    status: OrganizationStatus.ACTIVE,
+    pl_revenue: { gte: 1_000_000, lte: 5_000_000 },
+    ownership_filters: {
+      structure: { eq: OwnershipStructure.FAMILY },
+      owner_managed: true,
+      oldest_owner_birth_date: { lte: '1960-01-01' }
+    }
   },
-  aiMode: false                  // true sends ai_mode=on-default (5 credits)
+  sort: SearchSort.REVENUE,
+  order: SortOrder.DESC,
+  matchContext: true
 });
 console.log(result.total, result.results.length);
 ```
@@ -164,8 +185,11 @@ const result = await client.searchOrganizations({
 ```
 
 The typed `SearchOrganizationFilters` interface supports every documented
-identity, industry, status, location/radius, register, employee, balance-sheet,
-and profit-and-loss filter.
+identity, industry, status, liability, location/radius, register, employee,
+balance-sheet, and profit-and-loss filter. It also includes the Pro/Max
+`ownership_filters`, `executive_filters`, and `lifecycle_filters` groups.
+Each advanced field accepts a single value, a list of values, or a condition
+object using `gte`, `lte`, `gt`, `lt`, `eq`, and `exists`.
 
 Use `iterateSearchOrganizations` for lazy pagination beyond the 30-result
 per-request limit. Each fetched page is a separate billable request and the
@@ -184,6 +208,14 @@ for await (const organization of client.iterateSearchOrganizations({
 The friendly flat financial filters are automatically translated to the
 current nested `financial_filters` wire format. `company_size_category` is
 sent using the current `emp_size_category` wire name.
+
+Search queries contain 2–500 characters and may be omitted when filters are
+present. Radius searches use `location_coordinates: { lat, lon }` together
+with `location_max_distance_km`; legacy `{ latitude, longitude }` and
+`[lat, lon]` inputs are normalized for compatibility. `sort: 'distance'`
+requires a radius search. When enabled, `matchContext` returns the matching
+ownership, executive, and lifecycle values under each result's
+`_match_context` property.
 
 #### `fetchPerson(params)`
 
@@ -573,6 +605,7 @@ company.shareholders;
 company.ubos;
 company.shareholdings;
 company.mergersAndAcquisitions;
+company.network;                  // typed nodes and connections (Pro/Max)
 
 // Documents
 await company.fetchDocument('shareholders_list', 'output.pdf');
@@ -594,8 +627,8 @@ handelsregister document "KONUX GmbH" --type shareholders_list --output konux.pd
 
 # Filter-only search using any documented filters
 handelsregister search \
-  --filters '{"legal_form_code":"GmbH","pl_revenue":{"gte":1000000}}' \
-  --limit 30
+  --filters '{"legal_form_code":"GmbH","ownership_filters":{"owner_managed":true}}' \
+  --sort revenue --order desc --match-context --limit 30
 
 # Structured XML document
 handelsregister document "KONUX GmbH" --type SI --output konux.xml
@@ -672,6 +705,8 @@ Ownership:
 - `shareholdings` - Outbound shareholdings the company holds in others
 - `mergers_and_acquisitions` - Mergers, divisions, enterprise agreements,
   counterparties, succession and control relationships
+- `network` - Relationship graph of connected organizations and people
+  (beta, Pro/Max)
 
 Enrichment:
 - `news` - News articles about the company
@@ -699,6 +734,8 @@ data.contact_data?.website;
 data.shareholdings?.holdings?.current;
 data.ubos?.beneficial_owners;
 data.mergers_and_acquisitions?.control?.controlled_by;
+data.network?.nodes;
+data.network?.connections;
 data.history; // requested via features: ['publications']
 ```
 
@@ -728,7 +765,10 @@ try {
   } else if (error instanceof RateLimitError) {
     console.error('Rate limit exceeded');
   } else if (error instanceof SubscriptionRequiredError) {
-    console.error('This endpoint or Signal topic requires another plan');
+    console.error(error.message);
+    console.error('Accepted plans:', error.requiredPlans);
+    console.error('Blocked filters:', error.blockedFilters);
+    console.error('Blocked features:', error.blockedFeatures);
   } else if (error instanceof IdempotencyConflictError) {
     console.error('Inspect the stored operation before retrying');
   }
@@ -737,7 +777,9 @@ try {
 
 Errors preserve the parsed API response on `error.response`, the HTTP status on
 `error.statusCode`, response headers on `error.responseHeaders`, and
-machine-readable API codes on `error.errorCode`. The legacy
+machine-readable API codes on `error.code` (also `error.errorCode`). Plan
+errors additionally expose `requiredPlans`, `blockedFilters`, and
+`blockedFeatures`. The legacy
 `PaymentRequiredError`, `ForbiddenError`, and `ValidationError` classes remain
 available; their current specialized subclasses continue to satisfy
 `instanceof` checks against those base classes.
@@ -747,12 +789,32 @@ available; their current specialized subclasses continue to satisfy
 This SDK is written in TypeScript and provides full type definitions:
 
 ```typescript
-import { Handelsregister, Company, CompanyData, Feature } from 'handelsregister';
+import {
+  CompanyData,
+  Feature,
+  Handelsregister,
+  OrganizationStatus,
+  SearchOrganizationFilters,
+  SearchSort,
+  SortOrder
+} from 'handelsregister';
 
 const features: Feature[] = ['financial_kpi', 'related_persons'];
 const data: CompanyData = await client.fetchOrganization({
   q: 'company name',
   features
+});
+
+const filters: SearchOrganizationFilters = {
+  legal_form_code: 'GmbH',
+  status: OrganizationStatus.ACTIVE,
+  ownership_filters: { largest_share_ratio: { gte: 0.5 } }
+};
+await client.searchOrganizations({
+  filters,
+  sort: SearchSort.LARGEST_SHARE_RATIO,
+  order: SortOrder.DESC,
+  matchContext: true
 });
 ```
 

@@ -1,8 +1,8 @@
 /** Receiver-side helpers for signed handelsregister.ai monitoring webhooks. */
 
 import { createHmac, timingSafeEqual } from 'crypto';
-import { WebhookSignatureError } from './errors';
-import type { WebhookEventEnvelope } from './types';
+import { WebhookSignatureError } from './errors.js';
+import type { WebhookEventEnvelope } from './types.js';
 
 export const VERIFICATION_RESPONSE_HEADER = 'webhook-verification';
 export const DEFAULT_TOLERANCE_SECONDS = 300;

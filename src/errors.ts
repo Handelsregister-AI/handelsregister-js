@@ -39,6 +39,11 @@ export class HandelsregisterError extends Error {
       ? (this.payload as Record<string, unknown>).detail
       : undefined;
   }
+
+  /** Stable machine-readable API error code, when supplied. */
+  get code(): string | undefined {
+    return this.errorCode;
+  }
 }
 
 export class InvalidResponseError extends HandelsregisterError {
@@ -129,6 +134,34 @@ export class SubscriptionRequiredError extends ForbiddenError {
   ) {
     super(message, response, errorCode, responseHeaders);
     this.name = 'SubscriptionRequiredError';
+  }
+
+  private stringList(value: unknown): string[] {
+    if (typeof value === 'string' && value) return [value];
+    if (!Array.isArray(value)) return [];
+    return value.filter(
+      (item): item is string => typeof item === 'string' && item.length > 0,
+    );
+  }
+
+  /** Plan codes accepted by the rejected operation, when supplied. */
+  get requiredPlans(): string[] {
+    const metaValue = this.meta.required_plans;
+    if (metaValue !== undefined) return this.stringList(metaValue);
+    if (!this.payload || typeof this.payload !== 'object') return [];
+    return this.stringList(
+      (this.payload as Record<string, unknown>).required_plans,
+    );
+  }
+
+  /** Advanced search filter groups rejected by the current plan. */
+  get blockedFilters(): string[] {
+    return this.stringList(this.meta.blocked_filters);
+  }
+
+  /** Requested organization features rejected by the current plan. */
+  get blockedFeatures(): string[] {
+    return this.stringList(this.meta.blocked_features);
   }
 }
 

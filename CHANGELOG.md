@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-14
+
+### Added
+
+- Pro/Max `network` organization feature with typed graph nodes and
+  connections, plus `Company.network`.
+- First-class organization-search sorting, ordering, and match-context
+  parameters, including automatic pagination forwarding.
+- Typed ownership, executive, and lifecycle search filters with comparison
+  and existence conditions.
+- Public organization-status, liability, ownership-structure,
+  insolvency-status, search-sort, and sort-order constants and types.
+- Actionable plan-denial properties on `SubscriptionRequiredError`:
+  `requiredPlans`, `blockedFilters`, and `blockedFeatures`.
+
+### Changed
+
+- Organization search now enforces the current 500-character query maximum,
+  accepts one legal-form code, normalizes legacy search coordinates to
+  `{lat, lon}`, and validates current geographic and advanced-filter shapes.
+- API plan errors prefer the server's human-readable message over its machine
+  code.
+- The published ESM build now uses Node-compatible module specifiers and is
+  exercised alongside the CommonJS build in CI.
+- Network requests preflight the plan through the free Account API, preventing
+  lower-tier accounts from being charged for a silently reduced base profile.
+- Updated the CLI, README, examples, and unit coverage for the new APIs.
+
 ## [0.4.0] - 2026-08-07
 
 ### Added

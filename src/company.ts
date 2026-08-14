@@ -1,4 +1,4 @@
-import { Handelsregister } from './client';
+import { Handelsregister } from './client.js';
 import {
   CompanyData,
   AiSearchMode,
@@ -19,9 +19,10 @@ import {
   Coordinates,
   RepresentationScheme,
   MergersAndAcquisitionsInfo,
+  OrganizationNetwork,
   AnnualFinancialStatement,
-} from './types';
-import { HandelsregisterConfig } from './types';
+} from './types.js';
+import { HandelsregisterConfig } from './types.js';
 
 export interface CompanyOptions {
   features?: Feature[];
@@ -421,6 +422,11 @@ export class Company {
 
   get mergersAndAcquisitions(): MergersAndAcquisitionsInfo | undefined {
     return this.data?.mergers_and_acquisitions;
+  }
+
+  /** Relationship graph returned by the Pro/Max `network` feature. */
+  get network(): OrganizationNetwork | undefined {
+    return this.data?.network;
   }
 
   // News, insolvency, website content

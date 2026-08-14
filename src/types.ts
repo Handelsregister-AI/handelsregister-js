@@ -1,10 +1,17 @@
 import type {
+  InsolvencyStatus,
+  LegalFormLiabilityType,
   MonitorStatus,
+  OrganizationFeature,
+  OrganizationStatus,
+  OwnershipStructure,
+  SearchSort,
   SignalTopic,
+  SortOrder,
   WebhookDeliveryStatus,
   WebhookEndpointStatus,
   WebhookEventType,
-} from './constants';
+} from './constants.js';
 
 export interface HandelsregisterConfig {
   apiKey?: string;
@@ -21,21 +28,8 @@ export type AiSearchMode = 'on-default' | 'off';
 export type RealtimeMode = 'handelsregister-default';
 export type SearchAiMode = 'on-default';
 
-export type Feature =
-  | 'related_persons'
-  | 'publications'
-  | 'financial_kpi'
-  | 'balance_sheet_accounts'
-  | 'profit_and_loss_account'
-  | 'annual_financial_statements'
-  | 'annual_financial_statements__html'
-  | 'insolvency_publications'
-  | 'news'
-  | 'website_content'
-  | 'shareholders'
-  | 'ubos'
-  | 'shareholdings'
-  | 'mergers_and_acquisitions';
+/** Backward-compatible alias for the organization feature taxonomy. */
+export type Feature = OrganizationFeature;
 
 export interface SearchParams {
   q?: string;
@@ -56,6 +50,8 @@ export interface ApiMeta {
   request_credit_cost?: number;
   credits_remaining?: number | string;
   required_plans?: string[];
+  blocked_filters?: string[];
+  blocked_features?: string[];
   [key: string]: unknown;
 }
 
@@ -578,6 +574,39 @@ export interface MergersAndAcquisitionsInfo {
   [key: string]: unknown;
 }
 
+export interface NetworkNodeReference {
+  node_id?: string;
+  type?: string;
+  name?: string;
+  [key: string]: unknown;
+}
+
+export interface NetworkNode extends NetworkNodeReference {
+  entity_id?: string;
+  depth?: number;
+  is_root?: boolean;
+}
+
+export interface NetworkConnection {
+  source?: NetworkNodeReference;
+  target?: NetworkNodeReference;
+  connection_type?: string;
+  label?: string;
+  role?: LocalizedText | LocalizedRole | Record<string, unknown>;
+  start_date?: string | null;
+  end_date?: string | null;
+  is_current?: boolean;
+  depth?: number;
+  [key: string]: unknown;
+}
+
+export interface OrganizationNetwork {
+  depth?: number;
+  nodes?: NetworkNode[];
+  connections?: NetworkConnection[];
+  [key: string]: unknown;
+}
+
 export interface CompanyData {
   entity_id: string;
   name: string;
@@ -611,6 +640,7 @@ export interface CompanyData {
   ubos?: UBOInfo;
   shareholdings?: ShareholdingsInfo;
   mergers_and_acquisitions?: MergersAndAcquisitionsInfo;
+  network?: OrganizationNetwork;
   news?: NewsItem[];
   insolvency_publications?: InsolvencyPublication[];
   website_content?: WebsiteContent;
@@ -641,20 +671,66 @@ export interface RangeFilter {
   lte?: number;
 }
 
+export interface FilterCondition<T = unknown> {
+  gte?: T;
+  lte?: T;
+  gt?: T;
+  lt?: T;
+  eq?: T;
+  exists?: boolean;
+}
+
+export interface LocationCoordinates {
+  lat: number;
+  lon: number;
+}
+
+export interface LegacyLocationCoordinates {
+  latitude: number;
+  longitude: number;
+}
+
+export type FilterValue<T> = T | ReadonlyArray<T> | FilterCondition<T>;
+
+export interface OwnershipFilters {
+  structure?: FilterValue<OwnershipStructure>;
+  owner_managed?: FilterValue<boolean>;
+  likely_family_owned?: FilterValue<boolean>;
+  largest_share_ratio?: FilterValue<number>;
+  oldest_owner_birth_date?: FilterValue<string>;
+  youngest_owner_birth_date?: FilterValue<string>;
+}
+
+export interface ExecutiveFilters {
+  md_oldest_birth_date?: FilterValue<string>;
+  md_youngest_birth_date?: FilterValue<string>;
+}
+
+export interface LifecycleFilters {
+  insolvency_active?: FilterValue<boolean>;
+  insolvency_status?: FilterValue<InsolvencyStatus>;
+  insolvency_opened_date?: FilterValue<string>;
+}
+
 export type StringOrStrings = string | string[];
 export type CompanySizeCategory = 'micro' | 'small' | 'medium' | 'large';
 
 export interface SearchOrganizationFilters {
   registration_date_from?: string;
   registration_date_to?: string;
-  legal_form_code?: StringOrStrings;
+  legal_form_code?: string;
   industry_code?: StringOrStrings;
   industry_scheme?: string;
   active?: boolean;
+  status?: OrganizationStatus;
+  legal_form_liability_type?: LegalFormLiabilityType;
   postal_code?: string;
   city?: string;
   state?: string;
-  location_coordinates?: Coordinates | [number, number];
+  location_coordinates?:
+    | LocationCoordinates
+    | LegacyLocationCoordinates
+    | readonly [number, number];
   location_max_distance_km?: number;
   registration_type?: StringOrStrings;
   registration_authority_name?: string;
@@ -671,6 +747,9 @@ export interface SearchOrganizationFilters {
   pl_revenue?: RangeFilter;
   pl_net_income?: RangeFilter;
   pl_ebit?: RangeFilter;
+  ownership_filters?: OwnershipFilters;
+  executive_filters?: ExecutiveFilters;
+  lifecycle_filters?: LifecycleFilters;
   [key: string]: unknown;
 }
 
@@ -682,6 +761,9 @@ export interface SearchOrganizationsParams {
   limit?: number;
   filters?: SearchOrganizationFilters;
   aiMode?: SearchAiMode | boolean;
+  sort?: SearchSort;
+  order?: SortOrder;
+  matchContext?: boolean;
 }
 
 export interface SearchResultItem {
@@ -693,6 +775,7 @@ export interface SearchResultItem {
   purpose?: string;
   status?: string;
   legal_form?: string;
+  _match_context?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -836,6 +919,15 @@ export interface AccountResponse {
 export interface AccountCreditsResponse extends AccountResponse {
   balance?: Record<string, unknown>;
   bookings?: Array<Record<string, unknown>>;
+}
+
+export interface AccountSubscriptionResponse extends AccountResponse {
+  /** Current response envelope. `null` means there is no active subscription. */
+  subscription?:
+    | ({ plan?: string; [key: string]: unknown })
+    | null;
+  /** Legacy direct response shape retained for compatibility. */
+  plan?: string;
 }
 
 export interface AccountUsageParams {

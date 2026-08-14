@@ -3,7 +3,13 @@
 // Run:
 //   HANDELSREGISTER_API_KEY=... node examples/search.js
 
-const { Handelsregister } = require('..');
+const {
+  Handelsregister,
+  OrganizationStatus,
+  OwnershipStructure,
+  SearchSort,
+  SortOrder,
+} = require('..');
 
 async function main() {
   const client = new Handelsregister(process.env.HANDELSREGISTER_API_KEY);
@@ -13,10 +19,17 @@ async function main() {
     limit: 5,
     filters: {
       postal_code: '80331',
-      legal_form_code: ['GmbH', 'UG'],
-      active: true,
+      legal_form_code: 'GmbH',
+      status: OrganizationStatus.ACTIVE,
       pl_revenue: { gte: 1_000_000 },
+      ownership_filters: {
+        structure: { eq: OwnershipStructure.FAMILY },
+        owner_managed: true,
+      },
     },
+    sort: SearchSort.REVENUE,
+    order: SortOrder.DESC,
+    matchContext: true,
   });
 
   console.log(`Found ${result.total} matching companies (showing ${result.results.length}):\n`);

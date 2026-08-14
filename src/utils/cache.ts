@@ -1,4 +1,4 @@
-import { CacheEntry } from '../types';
+import { CacheEntry } from '../types.js';
 
 export class Cache<T> {
   private cache: Map<string, CacheEntry<T>>;

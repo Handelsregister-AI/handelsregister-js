@@ -1,6 +1,6 @@
-export { Handelsregister } from './client';
-export { Company, CompanyOptions } from './company';
-export { Person, PersonOptions } from './person';
+export { Handelsregister } from './client.js';
+export { Company, CompanyOptions } from './company.js';
+export { Person, PersonOptions } from './person.js';
 
 export {
   HandelsregisterError,
@@ -22,10 +22,10 @@ export {
   ServerError,
   ServiceUnavailableError,
   WebhookSignatureError,
-} from './errors';
+} from './errors.js';
 
-export * from './types';
-export * from './constants';
+export * from './types.js';
+export * from './constants.js';
 export {
   DEFAULT_TOLERANCE_SECONDS,
   VERIFICATION_RESPONSE_HEADER,
@@ -33,11 +33,11 @@ export {
   extractVerificationChallenge,
   verificationResponseHeaders,
   verifyWebhookSignature,
-} from './webhooks';
+} from './webhooks.js';
 export type {
   WebhookHeaders,
   WebhookPayload,
   WebhookSecret,
-} from './webhooks';
+} from './webhooks.js';
 
-export { version } from './version';
+export { version } from './version.js';

@@ -9,6 +9,10 @@ import {
   HandelsregisterError,
   AuthenticationError,
   SearchOrganizationFilters,
+  OrganizationStatus,
+  OwnershipStructure,
+  SearchSort,
+  SortOrder,
 } from '../src';
 
 async function demonstrateTypeScript(): Promise<void> {
@@ -77,11 +81,21 @@ async function demonstrateTypeScript(): Promise<void> {
     }
 
     const filters: SearchOrganizationFilters = {
-      legal_form_code: ['GmbH', 'AG'],
+      legal_form_code: 'GmbH',
+      status: OrganizationStatus.ACTIVE,
       state: 'Bayern',
       pl_revenue: { gte: 1_000_000 },
+      ownership_filters: {
+        structure: { eq: OwnershipStructure.FAMILY },
+      },
     };
-    await client.searchOrganizations({ filters, limit: 10 });
+    await client.searchOrganizations({
+      filters,
+      limit: 10,
+      sort: SearchSort.REVENUE,
+      order: SortOrder.DESC,
+      matchContext: true,
+    });
 
     // Using Company class with type safety
     await demonstrateCompanyClass();

@@ -1,4 +1,4 @@
-import { Handelsregister } from './client';
+import { Handelsregister } from './client.js';
 import {
   HandelsregisterConfig,
   PersonData,
@@ -6,7 +6,7 @@ import {
   PersonShareholdings,
   PersonContactEntry,
   PersonRegistryRole,
-} from './types';
+} from './types.js';
 
 export interface PersonOptions {
   features?: PersonFeature[];

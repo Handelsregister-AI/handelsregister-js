@@ -1,6 +1,6 @@
 {
   "name": "handelsregister",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Node.js SDK for accessing German company registry (Handelsregister) data via handelsregister.ai API",
   "main": "dist/index.js",
   "module": "dist/esm/index.js",
@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "npm run clean && npm run build:ts && npm run build:cli",
-    "build:ts": "tsc && tsc --module esnext --outDir dist/esm",
+    "build:ts": "tsc && tsc --module esnext --outDir dist/esm && node scripts/prepare-esm.mjs",
     "build:cli": "tsc cli/index.ts --rootDir cli --outDir cli --module commonjs --target ES2018 --moduleResolution node --esModuleInterop --skipLibCheck --declaration",
     "clean": "rimraf dist cli/*.js cli/*.d.ts",
     "test": "vitest run",
@@ -18,7 +18,8 @@
     "test:coverage": "vitest run --coverage",
     "lint": "eslint \"src/**/*.ts\" \"cli/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\" \"cli/**/*.ts\" \"tests/**/*.ts\"",
-    "prepublishOnly": "npm run lint && npm test",
+    "test:package": "node tests/package-import.cjs && node tests/package-import.mjs",
+    "prepublishOnly": "npm run lint && npm test && npm run build && npm run test:package",
     "prepare": "npm run build"
   },
   "keywords": [
