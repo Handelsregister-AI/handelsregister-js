@@ -934,6 +934,8 @@ CI and the ordinary test command. Credentials and raw responses are not printed.
 Version tags (`v0.6.0`, for example) trigger `.github/workflows/publish.yml`.
 The workflow checks the tag, tests Node 22/24/26, checks public TypeScript types,
 audits dependencies, builds and packs the SDK, then publishes through npm OIDC.
+An existing version tag can also be published by manually dispatching the
+workflow with its `tag` input, without rewriting the tag.
 In npm's package settings, configure GitHub Actions trusted publishing with
 organization `Handelsregister-AI`, repository `handelsregister-js`, workflow
 `publish.yml`, no environment, and direct `npm publish` allowed. No npm token
