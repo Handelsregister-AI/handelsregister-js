@@ -44,6 +44,9 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Test public TypeScript contracts
+        run: npm run test:types
+
       - name: Build CommonJS, ESM, declarations, and CLI
         run: npm run build
 
@@ -70,4 +73,4 @@ jobs:
         run: npm ci
 
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --audit-level=moderate

@@ -60,6 +60,40 @@ export interface Money {
   currency: string;
 }
 
+/** Registered capital is included in the base organization response. */
+export interface CapitalValue {
+  amount?: number | null;
+  currency?: string | null;
+  /** Open set, including STAMMKAPITAL, GRUNDKAPITAL and HAFTSUMME. */
+  kind?: string | null;
+  /** Unsigned amount of a capital change, not a signed delta. */
+  change_amount?: Money | null;
+  [key: string]: unknown;
+}
+
+export interface CapitalHistoryEntry {
+  value?: CapitalValue | null;
+  effective_from?: string | null;
+  effective_to?: string | null;
+  [key: string]: unknown;
+}
+
+export interface CapitalInfo {
+  current?: CapitalValue | null;
+  history?: CapitalHistoryEntry[];
+  [key: string]: unknown;
+}
+
+/** Source metadata available on every plan; absent on older API versions. */
+export interface FinancialProvenance {
+  statement_type?: string | null;
+  period_start?: string | null;
+  period_end?: string | null;
+  exempt_subsidiary?: boolean | null;
+  parent_organization?: OrganizationReference | null;
+  [key: string]: unknown;
+}
+
 export interface Coordinates {
   latitude?: number;
   longitude?: number;
@@ -175,8 +209,47 @@ export interface RelatedPerson {
   [key: string]: unknown;
 }
 
-export interface FinancialKPI {
+/** Pro/Max numeric metrics; absent on other plans or when unavailable. */
+export type ExtendedFinancialMetric =
+  | 'revenue_per_employee' | 'net_income_per_employee' | 'other_operating_income'
+  | 'material_expenses_goods' | 'material_expenses_services' | 'wages_salaries'
+  | 'social_expenses' | 'pension_costs' | 'depreciation_amortization'
+  | 'depreciation_amortization_operating' | 'write_downs_financial_assets_and_securities' | 'other_operating_expenses'
+  | 'selling_expenses' | 'admin_expenses' | 'opex_core'
+  | 'gross_profit' | 'income_taxes' | 'other_taxes'
+  | 'income_after_taxes' | 'interest_income' | 'interest_expense'
+  | 'finance_income' | 'finance_income_from_affiliates' | 'assets_total'
+  | 'fixed_assets_total' | 'current_assets_total' | 'inventory_total'
+  | 'receivables_total' | 'trade_receivables' | 'intragroup_receivables'
+  | 'securities_current_total' | 'cash_and_equivalents' | 'ppe_total'
+  | 'land_and_buildings' | 'intangible_assets' | 'long_term_financial_assets'
+  | 'prepaid_expenses' | 'equity_total' | 'capital_reserves'
+  | 'revenue_reserves' | 'profit_loss_carried_forward' | 'tangible_equity'
+  | 'liabilities_total' | 'provisions_total' | 'pension_provisions'
+  | 'other_provisions' | 'trade_payables' | 'intragroup_payables'
+  | 'liabilities_to_affiliated_companies' | 'other_liabilities' | 'deferred_income'
+  | 'bank_debt' | 'operating_working_capital' | 'net_working_capital_strict'
+  | 'net_working_capital_approx' | 'interest_bearing_debt_strict' | 'interest_bearing_debt_broad'
+  | 'net_debt_narrow' | 'net_debt_broad' | 'equity_ratio'
+  | 'tangible_equity_ratio' | 'debt_to_equity' | 'debt_to_assets'
+  | 'cash_to_assets' | 'cash_to_liabilities' | 'receivables_to_assets'
+  | 'inventory_to_assets' | 'ppe_to_assets' | 'intangible_to_assets'
+  | 'goodwill_to_assets' | 'intangible_to_equity' | 'gross_margin'
+  | 'ebitda_margin' | 'ebit_margin' | 'net_margin'
+  | 'material_intensity' | 'personnel_intensity' | 'sga_ratio'
+  | 'opex_ratio' | 'interest_coverage' | 'effective_tax_rate'
+  | 'capitalized_own_work_ratio' | 'inventory_change_ratio' | 'finance_to_ebt_ratio';
+
+export type ExtendedFinancialKPI = Partial<Record<ExtendedFinancialMetric, number | null>>;
+
+export interface FinancialKPI extends ExtendedFinancialKPI {
+  company_size_by_employees?: string | null;
+  company_size_by_assets?: string | null;
+  company_size_by_revenue?: string | null;
+  source_statement_date?: string | null;
+  source_statement_type?: string | null;
   year: number;
+  _provenance?: FinancialProvenance | null;
   revenue?: number | null;
   net_income?: number | null;
   active_total?: number | null;
@@ -201,13 +274,40 @@ export interface FinancialAccountName {
 export interface FinancialAccountNode {
   name: FinancialAccountName | string;
   value?: number | null;
-  children?: FinancialAccountNode[];
+  children?: FinancialAccountNode[] | null;
   [key: string]: unknown;
+}
+
+/** Current account trees and the older dictionary account layout. */
+export type FinancialAccounts =
+  | FinancialAccountNode[]
+  | Record<string, unknown>
+  | null;
+
+export interface ActivityStatement {
+  activity?: {
+    name?: FinancialAccountName | string | null;
+    [key: string]: unknown;
+  };
+  _provenance?: FinancialProvenance | null;
+  [key: string]: unknown;
+}
+
+/** Max-only § 6b EnWG balance sheet for one regulated activity. */
+export interface ActivityBalanceSheet extends ActivityStatement {
+  balance_sheet_accounts?: FinancialAccounts;
+}
+
+/** Max-only § 6b EnWG P&L for one regulated activity. */
+export interface ActivityProfitLossAccount extends ActivityStatement {
+  profit_and_loss_accounts?: FinancialAccounts;
 }
 
 export interface BalanceSheetAccount {
   year: number;
-  balance_sheet_accounts?: FinancialAccountNode[];
+  balance_sheet_accounts?: FinancialAccounts;
+  _provenance?: FinancialProvenance | null;
+  activity_statements?: ActivityBalanceSheet[] | null;
   /** @deprecated Legacy SDK shape retained for compatibility. */
   assets?: {
     fixed_assets?: number;
@@ -228,7 +328,9 @@ export interface BalanceSheetAccount {
 
 export interface ProfitLossAccount {
   year: number;
-  profit_and_loss_accounts?: FinancialAccountNode[];
+  profit_and_loss_accounts?: FinancialAccounts;
+  _provenance?: FinancialProvenance | null;
+  activity_statements?: ActivityProfitLossAccount[] | null;
   /** @deprecated Legacy flattened fields retained for compatibility. */
   revenue?: number;
   other_operating_income?: number;
@@ -334,6 +436,96 @@ export interface ShareholderInfo {
   /** @deprecated Legacy escape hatch. The current response is fully typed. */
   raw?: unknown;
   [key: string]: unknown;
+}
+
+/** Deep nominal amounts use `value`, unlike regular contributions' `amount`. */
+export interface ShareholderAmount {
+  value?: number | null;
+  currency?: string | null;
+  basis?: string | null;
+  [key: string]: unknown;
+}
+
+export interface ShareholderRecord {
+  date?: string | null;
+  /** SHAREHOLDER_LIST, FOUNDING_DOCUMENT, COMMERCIAL_REGISTER, or future values. */
+  source?: string | null;
+  [key: string]: unknown;
+}
+
+export interface ShareholderHolder {
+  entity_id?: string | null;
+  /** PERSON, ORGANIZATION, JOINT, or future values. */
+  type?: string | null;
+  name?: string | null;
+  city?: string | null;
+  country?: string | null;
+  legal_form?: string | null;
+  status?: string | null;
+  registration?: Registration | null;
+  registration_text?: string | null;
+  birth_date?: string | null;
+  /** JOINT co-owners: do not allocate the community's percentage to members. */
+  members?: ShareholderHolder[];
+  [key: string]: unknown;
+}
+
+export interface ShareRange {
+  from?: number | null;
+  to?: number | null;
+  count?: number | null;
+  nominal_value?: ShareholderAmount | null;
+  [key: string]: unknown;
+}
+
+export interface ShareholderOwnership {
+  /** 0–100, unlike regular shareholders' 0–1 contribution_ratio. */
+  percentage?: number | null;
+  percentage_basis?: string | null;
+  nominal_amount?: ShareholderAmount | null;
+  share_count?: number | null;
+  share_ranges?: ShareRange[];
+  [key: string]: unknown;
+}
+
+/** One printed document row; the same holder may occur multiple times. */
+export interface DeepShareholderEntry {
+  holder?: ShareholderHolder;
+  role?: string | null;
+  ownership?: ShareholderOwnership;
+  since?: string | null;
+  since_basis?: string | null;
+  until?: string | null;
+  [key: string]: unknown;
+}
+
+export interface DeepShareholderHistorySnapshot {
+  record?: ShareholderRecord;
+  share_capital?: ShareholderAmount | null;
+  entries?: DeepShareholderEntry[];
+  [key: string]: unknown;
+}
+
+export interface ShareholderChange {
+  holder?: ShareholderHolder;
+  percentage?: number | null;
+  percentage_before?: number | null;
+  percentage_after?: number | null;
+  [key: string]: unknown;
+}
+
+export interface ShareholderChanges {
+  compared_to?: string | null;
+  joined?: ShareholderChange[];
+  left?: ShareholderChange[];
+  changed?: ShareholderChange[];
+  [key: string]: unknown;
+}
+
+/** Max-only deep shareholders, separate from the regular shareholder feature. */
+export interface ShareholdersDeep extends DeepShareholderHistorySnapshot {
+  history?: DeepShareholderHistorySnapshot[];
+  changes?: ShareholderChanges | null;
 }
 
 export interface UBOPerson {
@@ -621,6 +813,7 @@ export interface CompanyData {
   products_and_services?: string;
   industry_classification?: string | Record<string, unknown>;
   representation_scheme?: RepresentationScheme;
+  capital?: CapitalInfo | null;
 
   related_persons?: {
     current?: RelatedPerson[];
@@ -637,6 +830,8 @@ export interface CompanyData {
   /** @deprecated Legacy SDK alias retained for compatibility. */
   annual_financial_statements_html?: AnnualFinancialStatement[];
   shareholders?: ShareholderInfo;
+  /** Omitted on non-Max; null when no current shareholder data exists. */
+  shareholders_deep?: ShareholdersDeep | null;
   ubos?: UBOInfo;
   shareholdings?: ShareholdingsInfo;
   mergers_and_acquisitions?: MergersAndAcquisitionsInfo;

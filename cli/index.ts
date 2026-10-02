@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import * as chalk from 'chalk';
+import chalk from 'chalk';
 import Table from 'cli-table3';
 import * as dotenv from 'dotenv';
-import { Handelsregister, Company, Person } from '../dist';
-import { Feature, DocumentType, PersonFeature } from '../dist/types';
+import { Handelsregister, Company, Person, financialAccountEntries, financialAccountName } from '../dist';
+import { Feature, DocumentType, PersonFeature, CompanyData, FinancialAccounts, FinancialProvenance } from '../dist/types';
 import { detectFileType } from '../dist/utils/fileHandler';
 import { version } from '../dist/version';
 
@@ -23,6 +23,7 @@ program
   .option('--no-color', 'Disable colored output');
 
 function buildClient(): Handelsregister {
+  if (program.opts().color === false) chalk.level = 0;
   const apiKey = program.opts().apiKey || process.env.HANDELSREGISTER_API_KEY;
   const bearerToken =
     program.opts().bearerToken || process.env.HANDELSREGISTER_BEARER_TOKEN;
@@ -48,6 +49,7 @@ program
   .option('--json', 'Output as JSON')
   .option('--no-ai-search', 'Disable AI search')
   .option('--realtime', 'Enable live Handelsregister lookup (+10 credits)')
+  .option('--financial-year <year>', 'Financial year to display (local selection; default: latest)', parseFinancialYear)
   .action(async (query: string, options: any) => {
     try {
       const client = buildClient();
@@ -63,7 +65,7 @@ program
       if (options.json) {
         console.log(JSON.stringify(data, null, 2));
       } else {
-        displayCompanyData(data);
+        displayCompanyData(data, options.financialYear as number | undefined);
       }
     } catch (error: any) {
       console.error(chalk.red(`Error: ${error.message}`));
@@ -664,7 +666,45 @@ program
 
 // ----- helpers -----
 
-function displayCompanyData(data: any): void {
+function parseFinancialYear(value: string): number {
+  if (!/^\d{4}$/.test(value)) throw new Error('--financial-year must be a four-digit year');
+  return Number(value);
+}
+
+function formatFinancialValue(key: string, value: unknown): string {
+  if (value === null || value === undefined) return '-';
+  if (typeof value !== 'number') return typeof value === 'string' ? value : JSON.stringify(value) ?? '-';
+  if (/(_ratio|_margin|_intensity|_rate|_coverage)$/.test(key) || key.includes('_to_') || key === 'employees') {
+    return value.toLocaleString('en-US', { maximumFractionDigits: 6 });
+  }
+  return `€${value.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+}
+
+function provenanceText(source: FinancialProvenance): string {
+  const parts = [source.statement_type, `${source.period_start ?? '?'}–${source.period_end ?? '?'}`];
+  if (source.exempt_subsidiary !== null && source.exempt_subsidiary !== undefined) {
+    parts.push(`Exempt subsidiary: ${source.exempt_subsidiary ? 'yes' : 'no'}`);
+  }
+  if (source.parent_organization) parts.push(`Parent: ${source.parent_organization.name ?? source.parent_organization.entity_id ?? JSON.stringify(source.parent_organization)}`);
+  return parts.filter(Boolean).join('; ');
+}
+
+function displayAccounts(title: string, accounts: FinancialAccounts | undefined, source?: FinancialProvenance | null): void {
+  console.log(chalk.bold.blue(`\n=== ${title} ===`));
+  if (source) console.log(`Source: ${provenanceText(source)}`);
+  const table = new Table({ head: ['Account', 'Value'] });
+  function addRows(tree: FinancialAccounts | undefined, prefix = ''): void {
+    for (const node of financialAccountEntries(tree)) {
+      const label = prefix + (financialAccountName(node.name) || 'Unnamed account');
+      table.push([label, formatFinancialValue('amount', node.value)]);
+      addRows(node.children, `${label} > `);
+    }
+  }
+  addRows(accounts);
+  if (table.length) console.log(table.toString());
+}
+
+function displayCompanyData(data: CompanyData, financialYear?: number): void {
   console.log(chalk.bold.blue('\n=== Company Information ===\n'));
 
   // Basic info
@@ -718,23 +758,65 @@ function displayCompanyData(data: any): void {
     console.log(personsTable.toString());
   }
 
-  // Financial KPIs
-  if (data.financial_kpi?.length > 0) {
-    console.log(chalk.bold.blue('\n=== Financial KPIs ==='));
-    const kpiTable = new Table({
-      head: ['Year', 'Revenue', 'Profit', 'Employees'],
-      style: { head: ['blue'] },
-    });
-
-    data.financial_kpi.slice(-3).forEach((kpi: any) => {
-      kpiTable.push([
-        kpi.year,
-        kpi.revenue ? `€${kpi.revenue.toLocaleString()}` : '-',
-        kpi.profit ? `€${kpi.profit.toLocaleString()}` : '-',
-        kpi.employees || '-',
+  const years = [...(data.financial_kpi ?? []), ...(data.balance_sheet_accounts ?? []), ...(data.profit_and_loss_account ?? [])].map(row => row.year);
+  const selectedYear = financialYear ?? (years.length ? Math.max(...years) : undefined);
+  const kpi = data.financial_kpi?.find(row => row.year === selectedYear);
+  if (kpi) {
+    console.log(chalk.bold.blue(`\n=== Financial KPIs ${selectedYear} ===`));
+    if (kpi._provenance) console.log(`Source: ${provenanceText(kpi._provenance)}`);
+    const table = new Table({ head: ['Metric', 'Value'] });
+    for (const [key, value] of Object.entries(kpi)) {
+      if (key !== 'year' && !key.startsWith('_')) table.push([key, formatFinancialValue(key, value)]);
+    }
+    console.log(table.toString());
+  }
+  const balance = data.balance_sheet_accounts?.find(row => row.year === selectedYear);
+  if (balance) {
+    displayAccounts(`Balance sheet ${selectedYear}`, balance.balance_sheet_accounts ?? { assets: balance.assets, liabilities: balance.liabilities }, balance._provenance);
+    for (const activity of balance.activity_statements ?? []) {
+      displayAccounts(`Activity balance sheet ${selectedYear}: ${financialAccountName(activity.activity?.name)}`, activity.balance_sheet_accounts, activity._provenance);
+    }
+  }
+  const pnl = data.profit_and_loss_account?.find(row => row.year === selectedYear);
+  if (pnl) {
+    const legacy = Object.fromEntries(Object.entries(pnl).filter(([key]) => key !== 'year' && !key.startsWith('_') && key !== 'activity_statements'));
+    displayAccounts(`P&L ${selectedYear}`, pnl.profit_and_loss_accounts ?? legacy, pnl._provenance);
+    for (const activity of pnl.activity_statements ?? []) {
+      displayAccounts(`Activity P&L ${selectedYear}: ${financialAccountName(activity.activity?.name)}`, activity.profit_and_loss_accounts, activity._provenance);
+    }
+  }
+  if (data.capital?.current) {
+    const capital = data.capital.current;
+    console.log(`Capital: ${capital.amount ?? '-'} ${capital.currency ?? ''} (${capital.kind ?? ''})`);
+  }
+  if (data.shareholders?.entries?.length) {
+    console.log(chalk.bold.blue('\n=== Shareholders ==='));
+    const table = new Table({ head: ['Holder', 'Contribution', 'Ownership'] });
+    for (const entry of data.shareholders.entries) {
+      table.push([
+        entry.shareholder?.entity_name ?? entry.display_name ?? [entry.shareholder?.first_name, entry.shareholder?.last_name].filter(Boolean).join(' ') ?? '-',
+        entry.contribution ? `${entry.contribution.amount} ${entry.contribution.currency}` : '-',
+        entry.contribution_ratio == null ? '-' : `${entry.contribution_ratio * 100}%`,
       ]);
-    });
-    console.log(kpiTable.toString());
+    }
+    console.log(table.toString());
+  }
+  if (data.shareholders_deep?.entries?.length) {
+    const deep = data.shareholders_deep;
+    console.log(chalk.bold.blue(`\n=== Deep shareholders (${deep.record?.date ?? deep.record?.source ?? 'current'}) ===`));
+    const table = new Table({ head: ['Holder', 'Role', 'Ownership', 'Share numbers', 'Since', 'Since basis'] });
+    for (const entry of deep.entries ?? []) {
+      const holder = entry.holder;
+      const members = holder?.type === 'JOINT' ? holder.members?.map(member => member.name ?? 'Unknown member').join(', ') : undefined;
+      table.push([
+        `${holder?.name ?? 'Unknown shareholder'}${members ? ` (${members})` : ''}`,
+        entry.role ?? '-',
+        entry.ownership?.percentage == null ? '-' : `${entry.ownership.percentage}%`,
+        entry.ownership?.share_ranges?.map(range => range.from == null || range.to == null ? '?' : range.from === range.to ? String(range.from) : `${range.from}–${range.to}`).join(', ') ?? '-',
+        entry.since ?? '-', entry.since_basis ?? '-',
+      ]);
+    }
+    console.log(table.toString());
   }
 
   // Meta info

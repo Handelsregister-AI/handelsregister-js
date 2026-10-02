@@ -21,6 +21,10 @@ import {
   MergersAndAcquisitionsInfo,
   OrganizationNetwork,
   AnnualFinancialStatement,
+  ActivityBalanceSheet,
+  ActivityProfitLossAccount,
+  ShareholdersDeep,
+  CapitalInfo,
 } from './types.js';
 import { HandelsregisterConfig } from './types.js';
 
@@ -373,6 +377,23 @@ export class Company {
     return this.data?.profit_and_loss_account || [];
   }
 
+  getBalanceSheetForYear(year: number): BalanceSheetAccount | undefined {
+    return this.balanceSheets.find(sheet => sheet.year === year);
+  }
+
+  getProfitLossAccountForYear(year: number): ProfitLossAccount | undefined {
+    return this.profitLossAccounts.find(account => account.year === year);
+  }
+
+  /** Local helpers on loaded data; missing years/activities return []. */
+  getActivityBalanceSheetsForYear(year: number): ActivityBalanceSheet[] {
+    return this.getBalanceSheetForYear(year)?.activity_statements ?? [];
+  }
+
+  getActivityProfitLossAccountsForYear(year: number): ActivityProfitLossAccount[] {
+    return this.getProfitLossAccountForYear(year)?.activity_statements ?? [];
+  }
+
   // Publications
   async getPublications(): Promise<Publication[]> {
     const data = await this.ensureData();
@@ -410,6 +431,23 @@ export class Company {
   // Ownership: shareholders / UBOs / shareholdings
   get shareholders(): ShareholderInfo | undefined {
     return this.data?.shareholders;
+  }
+
+  /** Separate Max feature; preserves omitted versus explicitly null data. */
+  get shareholdersDeep(): ShareholdersDeep | null | undefined {
+    return this.data?.shareholders_deep;
+  }
+
+  async getShareholdersDeep(): Promise<ShareholdersDeep | null | undefined> {
+    return (await this.ensureData()).shareholders_deep;
+  }
+
+  get capital(): CapitalInfo | null | undefined {
+    return this.data?.capital;
+  }
+
+  get capitalInfo(): CapitalInfo | null | undefined {
+    return this.capital;
   }
 
   get ubos(): UBOInfo | undefined {

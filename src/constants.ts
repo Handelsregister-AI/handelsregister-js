@@ -12,6 +12,7 @@ export const OrganizationFeature = {
   NEWS: 'news',
   WEBSITE_CONTENT: 'website_content',
   SHAREHOLDERS: 'shareholders',
+  SHAREHOLDERS_DEEP: 'shareholders_deep',
   UBOS: 'ubos',
   SHAREHOLDINGS: 'shareholdings',
   MERGERS_AND_ACQUISITIONS: 'mergers_and_acquisitions',

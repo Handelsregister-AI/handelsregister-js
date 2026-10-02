@@ -1,0 +1,81 @@
+name: Publish npm Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['22', '24', '26']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Verify release tag and version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node -e "const pkg = require('./package.json'); const sdk = require('./dist'); if (process.env.RELEASE_TAG !== 'v' + pkg.version || sdk.version !== pkg.version) throw new Error('Release tag and SDK versions must match');"
+      - run: npm run lint
+      - run: npm test
+      - run: npm run test:types
+      - run: npm run build
+      - run: npm run test:package
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm audit --audit-level=moderate
+      - name: Pack validated distribution
+        run: |
+          mkdir release
+          npm pack --pack-destination release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: npm-package-distribution
+          path: release/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@11
+      - uses: actions/download-artifact@v8
+        with:
+          name: npm-package-distribution
+          path: release
+      - name: Publish to npm using trusted publishing
+        run: npm publish release/*.tgz --access public --ignore-scripts

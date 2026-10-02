@@ -41,3 +41,4 @@ export type {
 } from './webhooks.js';
 
 export { version } from './version.js';
+export { financialAccountName, financialAccountEntries, walkFinancialAccounts } from './financials.js';

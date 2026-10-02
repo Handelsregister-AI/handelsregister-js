@@ -138,6 +138,68 @@ billable request, the SDK checks the subscription through the free Account API.
 Lower-tier accounts receive `SubscriptionRequiredError` instead of a silently
 reduced base profile.
 
+#### Deep shareholders, capital and activity financials
+
+`shareholders_deep` is a separate Max feature. It coexists with `shareholders`
+and costs 80 credits only when current entries are returned, plus the ordinary
+5-credit lookup. The API ignores it on other plans (the key is omitted); on Max,
+no current data produces `null`. The SDK preserves these distinctions and does
+not add a subscription preflight or request this feature automatically.
+
+```javascript
+const { Company, walkFinancialAccounts, financialAccountName } = require('handelsregister');
+const company = new Company('OroraTech GmbH München', client, {
+  features: ['shareholders', 'shareholders_deep', 'balance_sheet_accounts', 'profit_and_loss_account']
+});
+await company.getRawData(); // Load once before using synchronous properties/helpers.
+console.log(company.shareholders);     // Existing regular feature, unchanged.
+console.log(company.shareholdersDeep); // Current entries, history, record and changes.
+console.log(company.capitalInfo);      // Included in the base organization response.
+for (const entry of company.shareholdersDeep?.entries ?? []) {
+  console.log(entry.holder?.name, entry.ownership?.percentage, entry.ownership?.share_ranges);
+}
+```
+
+Deep ownership percentages use **0–100**, while regular `contribution_ratio`
+uses **0–1**. Deep nominal amounts use `value`, regular contributions use
+`amount`. Entries represent printed document rows: holders can appear more than
+once. JOINT percentages belong to the community; they must not be assigned to
+individual members. Null values, unknown enum strings and future fields are
+retained. Capital `change_amount` is unsigned and must not be treated as a signed
+delta.
+
+Every financial year may include `_provenance` with statement type, period and
+exempt-subsidiary/parent information. It is available on all plans. Pro and Max
+also receive additional typed financial KPIs, including ratios and margins.
+On Max, the existing `balance_sheet_accounts` and `profit_and_loss_account`
+features include § 6b EnWG `activity_statements` for regulated energy activities.
+Each financial feature still costs 3 credits, with no extra activity flag or
+surcharge. Years without activities omit the key. Older API responses without
+the new fields continue to work; local activity helpers return `[]`.
+
+```javascript
+const energy = new Company('Stadtwerke Bad Pyrmont GmbH', client, {
+  features: ['balance_sheet_accounts', 'profit_and_loss_account']
+});
+await energy.getRawData();
+console.log(energy.getBalanceSheetForYear(2023)?._provenance);
+console.log(energy.getProfitLossAccountForYear(2023)?._provenance);
+for (const activity of energy.getActivityBalanceSheetsForYear(2023)) {
+  console.log(financialAccountName(activity.activity?.name), activity._provenance);
+  for (const account of walkFinancialAccounts(activity.balance_sheet_accounts)) {
+    console.log(financialAccountName(account.name), account.value);
+  }
+}
+for (const activity of energy.getActivityProfitLossAccountsForYear(2023)) {
+  console.log(activity.profit_and_loss_accounts); // Note the plural response key.
+}
+```
+
+Existing `balanceSheets`, `profitLossAccounts`, `financialKPIs`, `shareholders`
+and raw response accessors retain the response as returned. `financialAccountEntries`
+also accepts the older dictionary account format. All new types and helpers are
+exported from the package in CommonJS, ESM and TypeScript declarations.
+
 #### `searchOrganizations(params)`
 
 Paginated search with optional filters.
@@ -552,6 +614,16 @@ await client.revokeAllTokens();
 
 Batch enrich data files with company information.
 
+JSON output keeps the complete nested response in `handelsregister_data`.
+CSV and Excel include that column as JSON text, preserving the full response
+and its new metadata. All source columns and new response columns are retained.
+For Excel strings exceeding 32,767 UTF-16 units, the main cell contains
+`{"_handelsregister_excel_overflow":{"sheet":"Long values","row":2,"column":"handelsregister_data","chunks":N}}`.
+Reconstruct the original text by selecting that worksheet's matching `row` and
+`column`, sorting by `part`, and joining `value`; then parse the JSON. Smaller
+values remain directly in their cells. Chunks are literal strings, including
+text starting with `=`.
+
 ```javascript
 const result = await client.enrich({
   filePath: 'companies.csv',
@@ -701,6 +773,7 @@ Core:
 
 Ownership:
 - `shareholders` - Shareholder list with capital contributions
+- `shareholders_deep` - Max-only document rows, numbered shares, tenure, history and changes (80 credits when current entries are returned)
 - `ubos` - Ultimate beneficial owners
 - `shareholdings` - Outbound shareholdings the company holds in others
 - `mergers_and_acquisitions` - Mergers, divisions, enterprise agreements,
@@ -831,6 +904,40 @@ See the `examples/` directory for more detailed examples:
 - `monitoring.js` - Monitoring reads and receiver-side webhook verification
 - `enrichment.js` - Batch data enrichment
 - `typescript-example.ts` - TypeScript example
+- `shareholders-deep.js` - Regular and deep shareholders together (requires Max)
+- `activity-financials.js` - Activity balance sheets, P&Ls and provenance (requires Max for activities)
+
+### CLI financial selection
+
+```bash
+handelsregister fetch "Stadtwerke Bad Pyrmont GmbH" \
+  --feature balance_sheet_accounts profit_and_loss_account --financial-year 2023
+handelsregister fetch "OroraTech GmbH München" --feature shareholders shareholders_deep
+```
+
+`--financial-year` controls local display only; `--json` always returns every
+year and the complete original response. The default display selects the latest
+financial year. Activity tables have their own source information. Existing
+default feature selection is unchanged.
+
+### Publishing
+
+Opt-in live validation is available with `npm run test:live`. Set
+`HANDELSREGISTER_RUN_LIVE_FEATURE_TESTS=1`, `HANDELSREGISTER_API_KEY`, and the two
+Cloudflare Access variables for the default dev endpoint. Optionally set
+`HANDELSREGISTER_ENV_FILE` to an external `.env` path. The Max run fetches three
+energy companies and two companies with deep shareholders (216 credits in the
+validated data); `npm run test:live -- --nonmax` checks omitted Max-only fields
+using a non-Max key. Costs depend on data returned. Live tests are excluded from
+CI and the ordinary test command. Credentials and raw responses are not printed.
+
+Version tags (`v0.6.0`, for example) trigger `.github/workflows/publish.yml`.
+The workflow checks the tag, tests Node 22/24/26, checks public TypeScript types,
+audits dependencies, builds and packs the SDK, then publishes through npm OIDC.
+In npm's package settings, configure GitHub Actions trusted publishing with
+organization `Handelsregister-AI`, repository `handelsregister-js`, workflow
+`publish.yml`, no environment, and direct `npm publish` allowed. No npm token
+or API credentials are needed in the repository.
 
 ## License
 

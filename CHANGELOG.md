@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-02
+
+### Added
+
+- Separate Max-only `shareholders_deep` feature with types for holders, joint
+  communities, share ranges, ownership, tenure, document history and changes.
+  Existing regular shareholders remain available alongside it.
+- Typed registered capital and capital history in the base response, exposed
+  through `Company.capital` and `Company.capitalInfo`.
+- All-plan financial `_provenance`, expanded Pro/Max KPI types and Max-only
+  activity balance sheets and P&Ls under the existing financial features.
+- Year-specific Company helpers and public account traversal/name helpers.
+- CLI display of full financial trees, separate activity statements and their
+  sources, regular/deep shareholders, and local `--financial-year` selection.
+- Runnable examples, offline compatibility/contract/export/CLI tests and
+  TypeScript consumer checks for the new fields.
+- Tag-triggered npm trusted-publishing workflow through GitHub Actions.
+
+### Fixed
+
+- CSV/Excel enrichment now includes new response columns and serializes nested
+  values as JSON, preserving provenance, activity statements and deep ownership.
+- Oversized Excel values are split into literal chunks on `Long values` with
+  JSON references in the main sheet, preserving data beyond the cell limit.
+- CLI financial output retains zero/negative values and displays ratios without
+  currency suffixes.
+- Fix the CLI's Chalk import so human-readable commands and error rendering work.
+- Updated Axios, CSV parsing and development dependencies to patched releases.
+
 ## [0.5.0] - 2026-08-14
 
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "handelsregister",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Node.js SDK for accessing German company registry (Handelsregister) data via handelsregister.ai API",
   "main": "dist/index.js",
   "module": "dist/esm/index.js",
@@ -19,8 +19,10 @@
     "lint": "eslint \"src/**/*.ts\" \"cli/**/*.ts\"",
     "format": "prettier --write \"src/**/*.ts\" \"cli/**/*.ts\" \"tests/**/*.ts\"",
     "test:package": "node tests/package-import.cjs && node tests/package-import.mjs",
-    "prepublishOnly": "npm run lint && npm test && npm run build && npm run test:package",
-    "prepare": "npm run build"
+    "prepublishOnly": "npm run lint && npm test && npm run test:types && npm run build && npm run test:package",
+    "prepare": "npm run build",
+    "test:types": "tsc --noEmit --strict --target ES2018 --module commonjs --moduleResolution node --esModuleInterop --skipLibCheck tests/types-contract.ts",
+    "test:live": "node scripts/test-live-features.cjs"
   },
   "keywords": [
     "handelsregister",
@@ -35,12 +37,12 @@
   "author": "handelsregister.ai",
   "license": "AGPL-3.0-only",
   "dependencies": {
-    "axios": "^1.18.1",
+    "axios": "^1.20.0",
     "chalk": "^4.1.2",
     "cli-progress": "^3.12.0",
     "cli-table3": "^0.6.3",
     "commander": "^11.0.0",
-    "csv-parse": "^5.5.0",
+    "csv-parse": "^7.0.3",
     "csv-stringify": "^6.4.0",
     "dotenv": "^16.3.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
@@ -49,7 +51,7 @@
     "@eslint/js": "^10.0.1",
     "@types/cli-progress": "^3.11.0",
     "@types/node": "^22.20.1",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.8.0",
     "globals": "^16.5.0",
     "nock": "^14.0.16",
@@ -57,7 +59,7 @@
     "rimraf": "^6.1.3",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.65.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "files": [
     "dist",
