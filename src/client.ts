@@ -85,6 +85,7 @@ import {
 import { Cache, generateCacheKey } from './utils/cache.js';
 import { retry, sleep } from './utils/retry.js';
 import { FileRecord, readFile, writeFile } from './utils/fileHandler.js';
+import { annualAuditColumns } from './annualReports.js';
 import { version } from './version.js';
 
 const DEFAULT_BASE_URL = 'https://handelsregister.ai/api/v1/';
@@ -615,6 +616,14 @@ export class Handelsregister {
       throw new ValidationError('Search query (q) is required');
     }
     const features = Array.from(new Set(searchParams.features || []));
+    if (searchParams.financialYears !== undefined && (
+      !Number.isInteger(searchParams.financialYears) || searchParams.financialYears < 1 || searchParams.financialYears > 30
+    )) {
+      throw new ValidationError('financialYears must be an integer between 1 and 30');
+    }
+    if (searchParams.financialStatementType !== undefined && !['auto', 'annual', 'consolidated'].includes(searchParams.financialStatementType)) {
+      throw new ValidationError('financialStatementType must be auto, annual, or consolidated');
+    }
     if (
       searchParams.realtimeMode &&
       features.some(
@@ -633,6 +642,8 @@ export class Handelsregister {
           features,
           ai_search: this.normalizeAiSearch(searchParams.aiSearch),
           realtime_mode: this.normalizeRealtimeMode(searchParams.realtimeMode),
+          financial_years: searchParams.financialYears,
+          financial_statement_type: searchParams.financialStatementType,
         })
       : null;
 
@@ -659,6 +670,8 @@ export class Handelsregister {
 
     const realtimeValue = this.normalizeRealtimeMode(searchParams.realtimeMode);
     if (realtimeValue) queryParams.realtime_mode = realtimeValue;
+    if (searchParams.financialYears !== undefined) queryParams.financial_years = searchParams.financialYears;
+    if (searchParams.financialStatementType !== undefined) queryParams.financial_statement_type = searchParams.financialStatementType;
 
     const response = await this.requestWithRetry<CompanyData>(() =>
       this.httpClient.get('/fetch-organization', {
@@ -2133,7 +2146,10 @@ export class Handelsregister {
       `_enriched.${inputType}`,
     );
 
-    await writeFile(outputPath, processedItems, inputType, fileData.headers);
+    const outputItems = inputType === 'json' ? processedItems : processedItems.map(item => ({
+      ...item, ...annualAuditColumns(item.handelsregister_data),
+    }));
+    await writeFile(outputPath, outputItems, inputType, fileData.headers);
 
     // Clean up snapshot
     if (snapshotPath && fs.existsSync(snapshotPath)) {

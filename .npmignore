@@ -12,6 +12,11 @@ cli/*.ts
 # Development and configuration files
 .env
 .env.*
+.private/
+.claude/
+.codex/
+.agents/
+.aws/
 .gitignore
 tsconfig.json
 jest.config.js

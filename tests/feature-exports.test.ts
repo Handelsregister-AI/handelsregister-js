@@ -8,6 +8,7 @@ import { readFile, writeFile } from '../src/utils/fileHandler';
 import type { FileType } from '../src/utils/fileHandler';
 import { financialFixture } from './fixtures/new-features';
 import documented from './fixtures/shareholders-deep.json';
+import { auditFixture } from './fixtures/audits';
 
 describe('new feature enrichment exports', () => {
   let folder: string;
@@ -160,4 +161,87 @@ describe('new feature enrichment exports', () => {
       { handelsregister_data: payload },
     ]);
   });
+
+  it.each<FileType>(['json', 'csv', 'xlsx'])(
+    'retains full report bodies and compact audit metadata in %s',
+    async (inputType) => {
+      const data = auditFixture();
+      data.annual_financial_statements![0].document_md =
+        'Synthetic report text '.repeat(3000);
+      data.annual_financial_statements__html![0].document_html =
+        '<p>Synthetic report text</p>'.repeat(3000);
+      const before = structuredClone(data);
+      const input = join(folder, `audits.${inputType}`);
+      await writeFile(
+        input,
+        [{ name: 'Example', original: 'kept' }],
+        inputType,
+      );
+      const client = new Handelsregister('offline');
+      vi.spyOn(client, 'fetchOrganization').mockResolvedValue(data);
+      const result = await client.enrich({
+        filePath: input,
+        inputType,
+        queryProperties: { name: 'name' },
+        params: {
+          features: [
+            'annual_financial_statements',
+            'annual_financial_statements__html',
+          ],
+        },
+      });
+      expect(result.errorCount).toBe(0);
+      const record = (await readFile(result.outputPath, inputType)).data[0];
+      expect(record.original).toBe('kept');
+      expect(data).toEqual(before);
+      if (inputType === 'json') {
+        expect(record.handelsregister_data).toEqual(data);
+        expect(record).not.toHaveProperty(
+          'hr_annual_financial_statements_audit',
+        );
+        return;
+      }
+      let raw = JSON.parse(String(record.handelsregister_data));
+      if (inputType === 'xlsx') {
+        const reference = raw._handelsregister_excel_overflow;
+        const book = XLSX.readFile(result.outputPath);
+        const chunks = XLSX.utils.sheet_to_json<{
+          row: number;
+          column: string;
+          part: number;
+          value: string;
+        }>(book.Sheets[reference.sheet]);
+        const parts = chunks
+          .filter(
+            (row) =>
+              row.row === reference.row && row.column === reference.column,
+          )
+          .sort((a, b) => a.part - b.part);
+        expect(parts).toHaveLength(reference.chunks);
+        raw = JSON.parse(parts.map((row) => row.value).join(''));
+      }
+      expect(raw).toEqual(data);
+      for (const feature of [
+        'annual_financial_statements',
+        'annual_financial_statements__html',
+      ] as const) {
+        const metadata = JSON.parse(String(record[`hr_${feature}_audit`]));
+        expect(metadata).toHaveLength(4);
+        expect(metadata.map((row: { year: number }) => row.year)).toEqual([
+          2024, 2024, 2023, 2022,
+        ]);
+        expect(metadata[0]).toMatchObject({
+          future_report_field: 'retained',
+          document_type: 'Jahresabschluss',
+        });
+        expect(metadata[1].document_type).toBe('Konzernabschluss');
+        expect(metadata[3].audit).toBeNull();
+        for (const [index, row] of metadata.entries()) {
+          expect(row.audit).toEqual(data[feature]![index].audit);
+          expect(row).not.toHaveProperty('document_md');
+          expect(row).not.toHaveProperty('document_html');
+        }
+      }
+    },
+  );
 });

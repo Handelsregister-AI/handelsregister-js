@@ -13,6 +13,13 @@ import type {
   FinancialKPI,
   FinancialProvenance,
   ShareholdersDeep,
+  AnnualFinancialStatement,
+  AuditInfo,
+  AuditorInfo,
+  AuditorNetwork,
+  AuditSignatory,
+  AuditSignature,
+  FinancialStatementType,
 } from '../dist';
 
 const feature: Feature = OrganizationFeature.SHAREHOLDERS_DEEP;
@@ -88,3 +95,48 @@ const activities: ActivityBalanceSheet[] =
 financialAccountEntries(balance.balance_sheet_accounts);
 walkFinancialAccounts(pnl.profit_and_loss_accounts);
 void [invalidFeature, data, ratio, optionalDeep, activities];
+
+const network: AuditorNetwork = {
+  key: 'FUTURE_NETWORK',
+  name: null,
+  future: true,
+};
+const signer: AuditSignatory = {
+  name: 'Example',
+  academic_title: null,
+  qualification: 'WP',
+};
+const auditor: AuditorInfo = {
+  name: null,
+  type: 'INDIVIDUAL_AUDITORS',
+  entity_id: null,
+  network,
+  signatories: [signer],
+};
+const signature: AuditSignature = { place: 'München', date: null };
+const audit: AuditInfo = {
+  kind: 'FUTURE_KIND',
+  subject: 'FUTURE_SUBJECT',
+  audited: null,
+  accounting_framework: 'HGB',
+  auditor,
+  signed: signature,
+};
+const report: AnnualFinancialStatement = { year: 2024, audit, future: 'kept' };
+const maybeAudit: AuditInfo | null | undefined =
+  company.annualFinancialStatements[0]?.audit;
+const reports: AnnualFinancialStatement[] =
+  company.getAnnualFinancialStatementsForYear(2024, true);
+const loaded: Promise<AnnualFinancialStatement[]> =
+  company.getAnnualFinancialStatements(2024);
+const years: number[] = company.financialYears;
+const statementType: FinancialStatementType = 'consolidated';
+new Company('example', 'offline', {
+  financialYears: 5,
+  financialStatementType: statementType,
+});
+// @ts-expect-error Audit information is nested in reports, not a separate feature.
+const auditFeature: Feature = 'audit';
+// @ts-expect-error Audit status is a nullable boolean, not a string.
+const invalidAudit: AuditInfo = { audited: 'yes' };
+void [report, maybeAudit, reports, loaded, years, auditFeature, invalidAudit];

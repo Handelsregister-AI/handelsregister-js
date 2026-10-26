@@ -27,11 +27,15 @@ import {
   CapitalInfo,
 } from './types.js';
 import { HandelsregisterConfig } from './types.js';
+import { FinancialStatementType } from './types.js';
+import { annualReports } from './annualReports.js';
 
 export interface CompanyOptions {
   features?: Feature[];
   aiSearch?: AiSearchMode | boolean;
   realtimeMode?: RealtimeMode | boolean;
+  financialYears?: number;
+  financialStatementType?: FinancialStatementType;
 }
 
 export class Company {
@@ -41,6 +45,8 @@ export class Company {
   private features?: Feature[];
   private aiSearch?: AiSearchMode | boolean;
   private realtimeMode?: RealtimeMode | boolean;
+  private financialYearsLimit?: number;
+  private financialStatementType?: FinancialStatementType;
 
   constructor(
     searchQuery: string,
@@ -51,6 +57,8 @@ export class Company {
     this.features = options?.features;
     this.aiSearch = options?.aiSearch;
     this.realtimeMode = options?.realtimeMode;
+    this.financialYearsLimit = options?.financialYears;
+    this.financialStatementType = options?.financialStatementType;
 
     if (configOrClient instanceof Handelsregister) {
       this.client = configOrClient;
@@ -66,6 +74,8 @@ export class Company {
         features: this.features,
         aiSearch: this.aiSearch,
         realtimeMode: this.realtimeMode,
+        ...(this.financialYearsLimit !== undefined ? { financialYears: this.financialYearsLimit } : {}),
+        ...(this.financialStatementType !== undefined ? { financialStatementType: this.financialStatementType } : {}),
       });
     }
     return this.data;
@@ -406,26 +416,39 @@ export class Company {
 
   // Annual financial statements
   get annualFinancialStatements(): AnnualFinancialStatement[] {
-    return this.data?.annual_financial_statements || [];
+    return annualReports(this.data);
   }
 
   get annualFinancialStatementsHtml(): AnnualFinancialStatement[] {
-    return (
-      this.data?.annual_financial_statements__html ||
-      this.data?.annual_financial_statements_html ||
-      []
-    );
+    return annualReports(this.data, true);
+  }
+
+  /** Load reports once, optionally selecting a year locally. */
+  async getAnnualFinancialStatements(year?: number, html = false): Promise<AnnualFinancialStatement[]> {
+    await this.ensureData();
+    const reports = annualReports(this.data, html);
+    return year === undefined ? reports : reports.filter(report => report.year === year);
+  }
+
+  /** All loaded reports for a year in API order, including distinct report types. */
+  getAnnualFinancialStatementsForYear(year: number, html = false): AnnualFinancialStatement[] {
+    return annualReports(this.data, html).filter(report => report.year === year);
+  }
+
+  /** All loaded financial years, including report-only responses, newest first. */
+  get financialYears(): number[] {
+    const rows = [
+      ...this.financialKPIs, ...this.balanceSheets, ...this.profitLossAccounts,
+      ...this.annualFinancialStatements, ...this.annualFinancialStatementsHtml,
+    ];
+    return [...new Set(rows.map(row => row.year).filter(Number.isInteger))].sort((a, b) => b - a);
   }
 
   getAnnualFinancialStatementForYear(
     year: number,
     html: boolean = false,
   ): AnnualFinancialStatement | undefined {
-    const list = html
-      ? this.data?.annual_financial_statements__html ||
-        this.data?.annual_financial_statements_html
-      : this.data?.annual_financial_statements;
-    return list?.find((s) => s.year === year);
+    return this.getAnnualFinancialStatementsForYear(year, html)[0];
   }
 
   // Ownership: shareholders / UBOs / shareholdings

@@ -5,7 +5,8 @@ import chalk from 'chalk';
 import Table from 'cli-table3';
 import * as dotenv from 'dotenv';
 import { Handelsregister, Company, Person, financialAccountEntries, financialAccountName } from '../dist';
-import { Feature, DocumentType, PersonFeature, CompanyData, FinancialAccounts, FinancialProvenance } from '../dist/types';
+import { Feature, DocumentType, PersonFeature, CompanyData, FinancialAccounts, FinancialProvenance, AnnualFinancialStatement } from '../dist/types';
+import { annualReportsForDisplay } from '../dist/annualReports';
 import { detectFileType } from '../dist/utils/fileHandler';
 import { version } from '../dist/version';
 
@@ -49,7 +50,7 @@ program
   .option('--json', 'Output as JSON')
   .option('--no-ai-search', 'Disable AI search')
   .option('--realtime', 'Enable live Handelsregister lookup (+10 credits)')
-  .option('--financial-year <year>', 'Financial year to display (local selection; default: latest)', parseFinancialYear)
+  .option('--financial-year <year>', 'Financial year to display, including annual-report audits (local selection; default: latest)', parseFinancialYear)
   .action(async (query: string, options: any) => {
     try {
       const client = buildClient();
@@ -704,6 +705,42 @@ function displayAccounts(title: string, accounts: FinancialAccounts | undefined,
   if (table.length) console.log(table.toString());
 }
 
+function displayAudit(report: AnnualFinancialStatement): void {
+  const title = `Annual report audit ${report.year ?? 'Unknown year'}${report.document_type ? `: ${report.document_type}` : ''}`;
+  console.log(chalk.bold.blue(`\n=== ${title} ===`));
+  const table = new Table();
+  function add(label: string, value: string | null | undefined): void {
+    if (value !== null && value !== undefined && value !== '') table.push([label, String(value)]);
+  }
+  add('Report', report.document_title);
+  add('Published', report.document_date);
+  add('Language', report.language);
+  const audit = report.audit;
+  if (audit == null) {
+    add('Audit information', 'Not available');
+  } else {
+    add('Kind', audit.kind);
+    add('Subject', audit.subject);
+    add('Audited', audit.audited === true ? 'Yes' : audit.audited === false ? 'No' : 'Unknown');
+    add('Accounting framework', audit.accounting_framework);
+    const auditor = audit.auditor;
+    if (auditor) {
+      add('Auditor', auditor.name);
+      add('Auditor type', auditor.type);
+      add('Auditor entity ID', auditor.entity_id);
+      add('Network', auditor.network?.name);
+      add('Network key', auditor.network?.key);
+      for (const signer of auditor.signatories ?? []) {
+        const name = [signer.academic_title, signer.name].filter(Boolean).join(' ');
+        add('Signatory', `${name}${signer.qualification ? ` (${signer.qualification})` : ''}`.trim());
+      }
+    }
+    add('Signed in', audit.signed?.place);
+    add('Signed on', audit.signed?.date);
+  }
+  console.log(table.toString());
+}
+
 function displayCompanyData(data: CompanyData, financialYear?: number): void {
   console.log(chalk.bold.blue('\n=== Company Information ===\n'));
 
@@ -758,8 +795,12 @@ function displayCompanyData(data: CompanyData, financialYear?: number): void {
     console.log(personsTable.toString());
   }
 
-  const years = [...(data.financial_kpi ?? []), ...(data.balance_sheet_accounts ?? []), ...(data.profit_and_loss_account ?? [])].map(row => row.year);
+  const reports = annualReportsForDisplay(data);
+  const years = [...(data.financial_kpi ?? []), ...(data.balance_sheet_accounts ?? []), ...(data.profit_and_loss_account ?? []), ...reports].map(row => row.year).filter(Number.isInteger);
   const selectedYear = financialYear ?? (years.length ? Math.max(...years) : undefined);
+  for (const report of reports) {
+    if (report.year === selectedYear) displayAudit(report);
+  }
   const kpi = data.financial_kpi?.find(row => row.year === selectedYear);
   if (kpi) {
     console.log(chalk.bold.blue(`\n=== Financial KPIs ${selectedYear} ===`));

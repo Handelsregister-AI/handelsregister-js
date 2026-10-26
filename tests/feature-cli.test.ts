@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { financialFixture } from './fixtures/new-features';
 import documented from './fixtures/shareholders-deep.json';
+import { auditFixture } from './fixtures/audits';
 
 describe('built CLI new features', () => {
   let folder: string;
@@ -125,5 +126,90 @@ describe('built CLI new features', () => {
     const result = run(financialFixture, ['--financial-year', '2023abc']);
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain('four-digit year');
+  });
+
+  it('prints audits for report-only responses and deduplicates matching HTML copies', () => {
+    const result = run(auditFixture(), [
+      '--feature',
+      'annual_financial_statements',
+      'annual_financial_statements__html',
+      '--no-ai-search',
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.match(/Annual report audit 2024:/g)).toHaveLength(2);
+    for (const value of [
+      'HGB',
+      'IFRS',
+      'Example Audit GmbH',
+      'Example Network',
+      'Dr. Müller (WP)',
+      'Schmidt (WP)',
+      '2025-05-26',
+      '2026-01-05',
+      'Köln',
+    ]) {
+      expect(result.stdout).toContain(value);
+    }
+    expect(result.stdout).not.toContain('2023');
+    expect(result.stdout).not.toContain('# Synthetic report');
+    expect(result.params.features).toEqual([
+      'annual_financial_statements',
+      'annual_financial_statements__html',
+    ]);
+  });
+
+  it.each([2023, 2022, 2021])(
+    'prints individuals or missing audit information for %s',
+    (year) => {
+      const result = run(auditFixture(), ['--financial-year', String(year)]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(
+        result.stdout.match(new RegExp(`Annual report audit ${year}:`, 'g')),
+      ).toHaveLength(1);
+      expect(result.stdout).not.toContain('Example Audit GmbH');
+      expect(result.stdout).not.toContain('Example Network');
+      if (year === 2023) {
+        expect(result.stdout).toContain('INDIVIDUAL_AUDITORS');
+        expect(result.stdout).toContain('Dr. Müller (WP)');
+      } else {
+        expect(result.stdout).toContain('Not available');
+        expect(result.stdout).not.toContain('Audited');
+      }
+    },
+  );
+
+  it.each([
+    [false, 'No'],
+    [null, 'Unknown'],
+    [undefined, 'Unknown'],
+  ] as const)(
+    'preserves explicit false versus unknown audit status: %s',
+    (audited, label) => {
+      const data = auditFixture();
+      data.annual_financial_statements = [{ year: 2025, audit: { audited } }];
+      delete data.annual_financial_statements__html;
+      const result = run(data);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toMatch(new RegExp(`Audited[^\\n]+${label}`));
+    },
+  );
+
+  it('prints HTML-only reports and leaves JSON complete with local year selection', () => {
+    const data = auditFixture();
+    delete data.annual_financial_statements;
+    const text = run(data);
+    expect(text.status, text.stderr).toBe(0);
+    expect(text.stdout).toContain('Annual report audit 2024');
+    const result = run(data, [
+      '--json',
+      '--financial-year',
+      '2022',
+      '--feature',
+      'annual_financial_statements__html',
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual(data);
+    expect(result.params).not.toHaveProperty('financial_year');
+    expect(result.params).not.toHaveProperty('financialYears');
   });
 });

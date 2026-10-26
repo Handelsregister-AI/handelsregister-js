@@ -767,8 +767,8 @@ Core:
 - `balance_sheet_accounts` - Balance sheet data
 - `profit_and_loss_account` - P&L statement data
 - `publications` - Official publications
-- `annual_financial_statements` - Full annual reports (Markdown)
-- `annual_financial_statements__html` - Full annual reports (HTML)
+- `annual_financial_statements` - Full annual reports (Markdown) with audit metadata
+- `annual_financial_statements__html` - Full annual reports (HTML) with audit metadata
 - `insolvency_publications` - Insolvency court notices
 
 Ownership:
@@ -906,6 +906,87 @@ See the `examples/` directory for more detailed examples:
 - `typescript-example.ts` - TypeScript example
 - `shareholders-deep.js` - Regular and deep shareholders together (requires Max)
 - `activity-financials.js` - Activity balance sheets, P&Ls and provenance (requires Max for activities)
+- `audits.js` - Annual-report audits, firms, individual signatories and signing details
+
+### Annual-report audits
+
+Audit metadata is returned on each report under `audit`, using the existing
+annual-report features. Markdown and HTML have the same metadata. Each feature
+costs 5 credits when data is returned, plus the 5-credit lookup; audit information
+needs no separate feature flag. See the [financial statements reference](https://handelsregister.ai/de/documentation/data-financial-statements).
+
+```javascript
+const { Company, Handelsregister } = require('handelsregister');
+
+const company = new Company('KONUX GmbH', new Handelsregister(), {
+  features: ['annual_financial_statements'],
+  financialYears: 5,
+  aiSearch: false,
+});
+const reports = await company.getAnnualFinancialStatements(2024);
+for (const report of reports) {
+  console.log(report.document_type, report.document_title, report.document_date);
+  const audit = report.audit;
+  if (audit == null) {
+    console.log('No audit information returned');
+    continue;
+  }
+  console.log(audit.kind, audit.subject, audit.audited, audit.accounting_framework);
+  console.log(audit.auditor?.name, audit.auditor?.type, audit.auditor?.entity_id);
+  console.log(audit.auditor?.network?.key, audit.auditor?.network?.name);
+  for (const signer of audit.auditor?.signatories ?? []) {
+    console.log(signer.academic_title, signer.name, signer.qualification);
+  }
+  console.log(audit.signed?.place, audit.signed?.date);
+}
+```
+
+`AnnualFinancialStatement.audit` is typed as `AuditInfo | null | undefined`.
+The exported nested types are `AuditorInfo`, `AuditorNetwork`, `AuditSignatory`
+and `AuditSignature`. These are ordinary API objects: unknown fields, nulls and
+original names are preserved without coercion. Kind, subject, framework, auditor
+type and network key remain open-ended strings. Observed auditor types include
+`FIRM` and `INDIVIDUAL_AUDITORS`; individual auditors may have signatories but
+no firm name or network. A missing or null audit means no audit information was
+returned, **not** `audited: false`. Missing audit status stays unknown. Signing
+dates and publication dates are separate fields.
+
+After loading, `annualFinancialStatements` and `annualFinancialStatementsHtml`
+expose the typed raw reports. `getAnnualFinancialStatementForYear(year, html)`
+keeps its existing first-match/`undefined` behavior. The new plural
+`getAnnualFinancialStatementsForYear(year, html)` returns all matches or `[]`.
+`getAnnualFinancialStatements(year?, html?)` loads data asynchronously and can
+filter it locally. Reports keep API order and distinct documents sharing a
+year; audits are never merged into KPI or account-tree entries.
+`financialYears` includes all loaded report, KPI, balance-sheet and P&L years,
+sorted newest first. The legacy `annual_financial_statements_html` alias remains
+supported when the canonical double-underscore property is absent.
+
+Both `fetchOrganization` and `Company` options accept `financialYears` (1–30)
+and `financialStatementType` (`auto`, `annual`, `consolidated`). They map to the
+API's `financial_years` and `financial_statement_type` and participate in the
+request cache key. Without them, the API's normal selection applies.
+
+With `HANDELSREGISTER_API_KEY` set, display the audit table:
+
+```bash
+handelsregister fetch "KONUX GmbH" \
+  --feature annual_financial_statements --financial-year 2024 --no-ai-search
+node examples/audits.js "KONUX GmbH" 2024
+```
+
+The CLI prints firms, networks, individual signatories and signing details.
+It displays matching Markdown/HTML copies once and keeps distinct reports
+separate. Missing audits show “Not available”. `--financial-year` selects
+locally; it does not change the request or filter `--json` output.
+
+Enrichment retains the full response under `handelsregister_data`. CSV/Excel
+also include compact JSON columns `hr_annual_financial_statements_audit` and
+`hr_annual_financial_statements__html_audit` when the reports contain an `audit`
+key. These entries keep all report metadata and audits, excluding document
+bodies. Explicit null audits remain present; legacy omitted audit keys do not
+create entries. Large full responses use the existing `Long values` Excel
+overflow worksheet. JSON exports and snapshots retain their original shape.
 
 ### CLI financial selection
 
@@ -921,6 +1002,17 @@ financial year. Activity tables have their own source information. Existing
 default feature selection is unchanged.
 
 ### Publishing
+
+The audit-only live check is separate from the larger feature test suite:
+
+```bash
+HANDELSREGISTER_RUN_AUDIT_TESTS=1 npm run test:live:audits
+```
+
+It requests both report formats for one company (up to 15 credits), verifies
+metadata parity and Company helpers, and prints only a summary. Standard client
+environment settings (`HANDELSREGISTER_API_KEY`, `HANDELSREGISTER_BASE_URL`,
+`HANDELSREGISTER_EXTRA_HEADERS`) apply. Live checks are excluded from CI.
 
 Opt-in live validation is available with `npm run test:live`. Set
 `HANDELSREGISTER_RUN_LIVE_FEATURE_TESTS=1`, `HANDELSREGISTER_API_KEY`, and the two

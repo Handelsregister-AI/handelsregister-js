@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-26
+
+### Added
+
+- Typed annual-report audit information, including firms, individual auditors,
+  networks, signatories and signing details; preserve null and unknown values.
+- Async report loading, plural year helpers and `Company.financialYears`,
+  retaining existing raw accessors and distinct reports sharing a year.
+- Financial-year count and statement-type request selectors, including cache
+  separation and Company option forwarding.
+- CLI audit tables with local year selection, matching Markdown/HTML copies
+  displayed once, and explicit treatment of missing audit information.
+- Compact audit metadata columns in CSV/Excel enrichment alongside lossless
+  full reports, including large Excel values.
+- Audit example, offline/TypeScript/CLI/export coverage and opt-in live checks.
+
+### Fixed
+
+- Update vulnerable locked dependencies within their existing version ranges.
+
 ## [0.6.0] - 2026-10-02
 
 ### Added

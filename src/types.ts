@@ -31,11 +31,17 @@ export type SearchAiMode = 'on-default';
 /** Backward-compatible alias for the organization feature taxonomy. */
 export type Feature = OrganizationFeature;
 
+export type FinancialStatementType = 'auto' | 'annual' | 'consolidated';
+
 export interface SearchParams {
   q?: string;
   features?: Feature[];
   aiSearch?: AiSearchMode | boolean;
   realtimeMode?: RealtimeMode | boolean;
+  /** Number of latest financial years to request (1–30). */
+  financialYears?: number;
+  /** Apply the selected statement type to all requested financial features. */
+  financialStatementType?: FinancialStatementType;
 }
 
 export type DocumentType =
@@ -369,6 +375,47 @@ export interface Publication {
   [key: string]: unknown;
 }
 
+export interface AuditorNetwork {
+  key?: string | null;
+  name?: string | null;
+  [key: string]: unknown;
+}
+
+export interface AuditSignatory {
+  name?: string | null;
+  academic_title?: string | null;
+  qualification?: string | null;
+  [key: string]: unknown;
+}
+
+/** Observed types include FIRM and INDIVIDUAL_AUDITORS; future values are valid. */
+export interface AuditorInfo {
+  name?: string | null;
+  type?: string | null;
+  entity_id?: string | null;
+  network?: AuditorNetwork | null;
+  signatories?: AuditSignatory[] | null;
+  [key: string]: unknown;
+}
+
+/** The signature date is distinct from the report's publication date. */
+export interface AuditSignature {
+  place?: string | null;
+  date?: string | null;
+  [key: string]: unknown;
+}
+
+/** Audit metadata belongs to a document. Missing audited is unknown, not false. */
+export interface AuditInfo {
+  kind?: string | null;
+  subject?: string | null;
+  audited?: boolean | null;
+  accounting_framework?: string | null;
+  auditor?: AuditorInfo | null;
+  signed?: AuditSignature | null;
+  [key: string]: unknown;
+}
+
 export interface AnnualFinancialStatement {
   document_type?: string;
   document_date?: string;
@@ -377,6 +424,8 @@ export interface AnnualFinancialStatement {
   year: number;
   document_md?: string;
   document_html?: string;
+  /** Null or omitted means no audit information returned, not audited=false. */
+  audit?: AuditInfo | null;
   [key: string]: unknown;
 }
 
